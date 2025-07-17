@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Download, Trash2 } from 'lucide-react';
 import FilePreview from '../components/FilePreview';
 import { FileMetadata } from '../types';
 import { downloadFile, deleteFile, getFileMetadata } from '../utils/api';
@@ -93,17 +93,18 @@ const PreviewPage: React.FC = () => {
 
 	if (error) {
 		return (
-			<div className='min-h-screen bg-gray-50 flex items-center justify-center'>
-				<div className='text-center'>
-					<div className='flex justify-center mb-4'>
-						<AlertTriangle className='w-16 h-16 text-red-500' />
+			<div className='min-h-screen bg-gray-25 flex items-center justify-center'>
+				<div className='text-center max-w-md mx-auto px-6'>
+					<div className='w-16 h-16 bg-red-100 mx-auto mb-6 flex items-center justify-center'>
+						<AlertTriangle className='w-8 h-8 text-red-600' />
 					</div>
-					<div className='text-2xl font-medium text-gray-800 mb-2'>File Not Found</div>
-					<div className='text-gray-600 mb-6'>{error}</div>
+					<h1 className='text-2xl font-medium text-gray-900 mb-4'>File Not Found</h1>
+					<p className='text-gray-600 mb-8'>{error}</p>
 					<button
 						onClick={() => navigate('/')}
-						className='bg-primary-500 text-white px-6 py-2 rounded-lg hover:bg-primary-600 transition-colors'
+						className='btn-primary inline-flex items-center gap-2'
 					>
+						<ArrowLeft className='w-4 h-4' />
 						Go Back
 					</button>
 				</div>
@@ -113,10 +114,10 @@ const PreviewPage: React.FC = () => {
 
 	if (!metadata) {
 		return (
-			<div className='min-h-screen bg-gray-50 flex items-center justify-center'>
+			<div className='min-h-screen bg-gray-25 flex items-center justify-center'>
 				<div className='text-center'>
-					<div className='animate-spin w-12 h-12 border-4 border-gray-300 border-t-primary-500 rounded-full mx-auto mb-4'></div>
-					<div className='text-gray-600'>Loading file...</div>
+					<div className='animate-spin w-8 h-8 border-2 border-gray-200 border-t-primary-500 rounded-full mx-auto mb-4'></div>
+					<p className='text-gray-600'>Loading file...</p>
 				</div>
 			</div>
 		);
@@ -126,118 +127,132 @@ const PreviewPage: React.FC = () => {
 		metadata.size > 0 ? Math.round((1 - metadata.compressed_size / metadata.size) * 100) : 0;
 
 	return (
-		<div className='min-h-screen bg-gray-50'>
-			<div className='max-w-6xl mx-auto p-6'>
-				<div className='mb-6'>
-					<button
-						onClick={() => navigate('/')}
-						className='text-primary-600 hover:text-primary-700 font-medium'
-					>
-						← Back to Upload
-					</button>
-				</div>
-
-				<div className='bg-white rounded-lg shadow-sm border mb-6 overflow-hidden'>
-					<div className='px-6 py-4 border-b flex items-center justify-between'>
-						<h1 className='text-2xl font-bold text-gray-800'>File Preview</h1>
+		<div className='min-h-screen bg-gray-25'>
+			{/* Header */}
+			<header className='bg-white border-b border-gray-200'>
+				<div className='max-w-6xl mx-auto px-6 py-4'>
+					<div className='flex items-center justify-between'>
+						<div className='flex items-center gap-4'>
+							<button
+								onClick={() => navigate('/')}
+								className='text-gray-600 hover:text-gray-900 inline-flex items-center gap-2 font-medium'
+							>
+								<ArrowLeft className='w-4 h-4' />
+								Back to Upload
+							</button>
+							<div className='h-6 w-px bg-gray-300'></div>
+							<h1 className='text-xl font-medium text-gray-900'>File Preview</h1>
+						</div>
 						<div className='flex gap-3'>
 							<button
 								onClick={handleDownload}
-								className='bg-primary-500 text-white px-4 py-2 rounded-lg hover:bg-primary-600 transition-colors'
+								className='btn-primary inline-flex items-center gap-2'
 							>
+								<Download className='w-4 h-4' />
 								Download
 							</button>
 							<button
 								onClick={handleDelete}
-								className='bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 transition-colors'
+								className='bg-red-500 text-white px-4 py-2 hover:bg-red-600 transition-colors inline-flex items-center gap-2'
 							>
+								<Trash2 className='w-4 h-4' />
 								Delete
 							</button>
 						</div>
 					</div>
+				</div>
+			</header>
 
-					<div className='p-6 bg-gray-50'>
-						<div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm'>
+			{/* Main Content */}
+			<main className='max-w-6xl mx-auto px-6 py-8'>
+				{/* File Information */}
+				<div className='card mb-8 overflow-hidden'>
+					<div className='px-6 py-4 border-b border-gray-200 bg-gray-50'>
+						<h2 className='text-lg font-medium text-gray-900'>{metadata.filename}</h2>
+					</div>
+
+					<div className='p-6'>
+						<div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 text-sm'>
 							<div>
-								<div className='font-medium text-gray-600 mb-1'>Filename</div>
-								<div className='text-gray-800'>{metadata.filename}</div>
-							</div>
-							<div>
-								<div className='font-medium text-gray-600 mb-1'>Size</div>
-								<div className='text-gray-800'>{formatSize(metadata.size)}</div>
+								<div className='font-medium text-gray-600 mb-1'>File Size</div>
+								<div className='text-gray-900'>{formatSize(metadata.size)}</div>
 							</div>
 							<div>
 								<div className='font-medium text-gray-600 mb-1'>Compressed Size</div>
-								<div className='text-gray-800'>
-									{formatSize(metadata.compressed_size)} ({compressionRatio}% saved)
+								<div className='text-gray-900'>
+									{formatSize(metadata.compressed_size)}
+									<span className='text-green-600 ml-1'>({compressionRatio}% saved)</span>
 								</div>
 							</div>
 							<div>
-								<div className='font-medium text-gray-600 mb-1'>Type</div>
-								<div className='text-gray-800'>{metadata.mime_type}</div>
+								<div className='font-medium text-gray-600 mb-1'>File Type</div>
+								<div className='text-gray-900'>{metadata.mime_type}</div>
 							</div>
 							<div>
 								<div className='font-medium text-gray-600 mb-1'>Compression</div>
-								<div className='text-gray-800'>{metadata.compression}</div>
+								<div className='text-gray-900'>{metadata.compression}</div>
 							</div>
 							<div>
 								<div className='font-medium text-gray-600 mb-1'>Uploaded</div>
-								<div className='text-gray-800'>{formatDate(metadata.upload_time)}</div>
+								<div className='text-gray-900'>{formatDate(metadata.upload_time)}</div>
 							</div>
-						</div>
-
-						<div className='mt-4 bg-red-50 border border-red-200 rounded-lg p-3 text-center'>
-							<div className='font-medium text-red-800'>Expires in: {countdown}</div>
+							<div>
+								<div className='font-medium text-gray-600 mb-1'>Expires In</div>
+								<div className='text-red-600 font-medium'>{countdown}</div>
+							</div>
 						</div>
 					</div>
 				</div>
 
+				{/* File Preview */}
 				<FilePreview fileId={metadata.id} metadata={metadata} />
-			</div>
+			</main>
 
 			{/* Password Dialog */}
 			{showPasswordDialog && (
-				<div className='fixed inset-0 bg-black/50 flex items-center justify-center z-50'>
-					<div className='bg-white rounded-2xl p-6 w-full max-w-md mx-4'>
-						<h3 className='text-xl font-semibold text-gray-800 mb-4'>
-							{passwordDialogType === 'download'
-								? 'Download Password Required'
-								: 'Delete Password Required'}
-						</h3>
-						<p className='text-gray-600 mb-6'>
-							{passwordDialogType === 'download'
-								? 'This file is password protected. Enter the password to download it.'
-								: 'Enter the delete password to permanently remove this file.'}
-						</p>
-						<input
-							type='password'
-							value={passwordInput}
-							onChange={(e) => setPasswordInput(e.target.value)}
-							placeholder={
-								passwordDialogType === 'download'
-									? 'Enter download password'
-									: 'Enter delete password'
-							}
-							className='w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4'
-							onKeyDown={(e) => e.key === 'Enter' && handlePasswordSubmit()}
-						/>
-						<div className='flex gap-3'>
-							<button
-								onClick={() => {
-									setShowPasswordDialog(false);
-									setPasswordInput('');
-								}}
-								className='flex-1 px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition-colors'
-							>
-								Cancel
-							</button>
-							<button
-								onClick={handlePasswordSubmit}
-								disabled={!passwordInput}
-								className='flex-1 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors'
-							>
-								{passwordDialogType === 'download' ? 'Download' : 'Delete'}
-							</button>
+				<div className='fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4'>
+					<div className='bg-white shadow-angular-xl w-full max-w-md'>
+						<div className='p-6'>
+							<h3 className='text-xl font-medium text-gray-900 mb-4'>
+								{passwordDialogType === 'download'
+									? 'Download Password Required'
+									: 'Delete Password Required'}
+							</h3>
+							<p className='text-gray-600 mb-6'>
+								{passwordDialogType === 'download'
+									? 'This file is password protected. Enter the password to download it.'
+									: 'Enter the delete password to permanently remove this file.'}
+							</p>
+							<input
+								type='password'
+								value={passwordInput}
+								onChange={(e) => setPasswordInput(e.target.value)}
+								placeholder={
+									passwordDialogType === 'download'
+										? 'Enter download password'
+										: 'Enter delete password'
+								}
+								className='input-field w-full mb-6'
+								onKeyDown={(e) => e.key === 'Enter' && handlePasswordSubmit()}
+							/>
+							<div className='flex gap-3'>
+								<button
+									onClick={() => {
+										setShowPasswordDialog(false);
+										setPasswordInput('');
+									}}
+									className='btn-secondary flex-1'
+								>
+									Cancel
+								</button>
+								<button
+									onClick={handlePasswordSubmit}
+									disabled={!passwordInput}
+									className='btn-primary flex-1 disabled:bg-gray-300 disabled:cursor-not-allowed'
+								>
+									{passwordDialogType === 'download' ? 'Download' : 'Delete'}
+								</button>
+							</div>
 						</div>
 					</div>
 				</div>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AlertTriangle, File, Folder } from 'lucide-react';
+import { AlertTriangle, File, Folder, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { FileMetadata, ZipContents, ZipFile } from '../types';
 import { getFilePreview, getZipContents, getZipFilePreview } from '../utils/api';
 import { formatSize, formatDate } from '../utils/format';
@@ -28,7 +28,6 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 			loadZipContents();
 		}
 
-		// Cleanup function to revoke object URL and prevent memory leaks
 		return () => {
 			if (previewUrl) {
 				URL.revokeObjectURL(previewUrl);
@@ -39,7 +38,6 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 		};
 	}, [fileId, metadata]);
 
-	// Keyboard navigation for ZIP file preview
 	useEffect(() => {
 		const handleKeyDown = (event: KeyboardEvent) => {
 			if (!isZipFilePreviewOpen || !zipFilePreview) return;
@@ -71,7 +69,6 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 
 	const loadPreview = async () => {
 		try {
-			// Revoke previous URL to prevent memory leaks
 			if (previewUrl) {
 				URL.revokeObjectURL(previewUrl);
 			}
@@ -105,16 +102,13 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 		}
 	};
 
-	// Get previewable files (non-directories)
 	const getPreviewableFiles = () => {
 		if (!zipContents) return [];
 		return zipContents.files.filter((file) => !file.is_dir);
 	};
 
 	const handleZipFileDoubleClick = async (file: ZipFile) => {
-		if (file.is_dir) {
-			return; // Don't preview directories
-		}
+		if (file.is_dir) return;
 
 		const previewableFiles = getPreviewableFiles();
 		const currentIndex = previewableFiles.findIndex((f) => f.name === file.name);
@@ -122,7 +116,6 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 		try {
 			const { blob, contentType } = await getZipFilePreview(fileId, file.name);
 
-			// Revoke previous preview URL if exists
 			if (zipFilePreview?.previewUrl) {
 				URL.revokeObjectURL(zipFilePreview.previewUrl);
 			}
@@ -168,7 +161,6 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 		try {
 			const { blob, contentType } = await getZipFilePreview(fileId, nextFile.name);
 
-			// Revoke previous preview URL
 			URL.revokeObjectURL(zipFilePreview.previewUrl);
 
 			const previewUrl = URL.createObjectURL(blob);
@@ -187,9 +179,9 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 	const renderPreview = () => {
 		if (error) {
 			return (
-				<div className='text-center py-16 text-red-600 bg-red-50 rounded-lg'>
-					<div className='flex justify-center mb-4'>
-						<AlertTriangle className='w-12 h-12' />
+				<div className='text-center p-10 text-red-600 bg-red-50 border border-red-200'>
+					<div className='w-12 h-12 bg-red-100 mx-auto mb-4 flex items-center justify-center'>
+						<AlertTriangle className='w-6 h-6 text-red-600' />
 					</div>
 					<div>{error}</div>
 				</div>
@@ -199,7 +191,7 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 		if (!previewUrl) {
 			return (
 				<div className='text-center py-16 text-gray-500'>
-					<div className='animate-spin w-8 h-8 border-3 border-gray-300 border-t-primary-500 rounded-full mx-auto mb-4'></div>
+					<div className='animate-spin w-8 h-8 border-2 border-gray-200 border-t-primary-500 rounded-full mx-auto mb-4'></div>
 					<div>Loading preview...</div>
 				</div>
 			);
@@ -249,7 +241,7 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 				<div className='text-left'>
 					<iframe
 						src={previewUrl}
-						className='w-full h-96 border border-gray-300 rounded-lg bg-gray-50'
+						className='w-full h-96 border border-gray-300 bg-gray-50'
 						title='Text Preview'
 					/>
 				</div>
@@ -257,9 +249,9 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 		}
 
 		return (
-			<div className='text-center py-16 text-gray-500 bg-gray-50 rounded-lg'>
-				<div className='flex justify-center mb-4'>
-					<File className='w-12 h-12' />
+			<div className='text-center py-16 text-gray-500 bg-gray-50 border border-gray-200'>
+				<div className='w-12 h-12 bg-gray-100 mx-auto mb-4 flex items-center justify-center'>
+					<File className='w-6 h-6 text-gray-500' />
 				</div>
 				<div>Preview not supported for this file type.</div>
 				<div className='text-sm mt-2'>You can still download the file.</div>
@@ -271,7 +263,7 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 		if (!zipContents) {
 			return (
 				<div className='text-center py-8 text-gray-500'>
-					<div className='animate-spin w-6 h-6 border-2 border-gray-300 border-t-primary-500 rounded-full mx-auto mb-4'></div>
+					<div className='animate-spin w-6 h-6 border-2 border-gray-200 border-t-primary-500 rounded-full mx-auto mb-4'></div>
 					<div>Loading ZIP contents...</div>
 				</div>
 			);
@@ -279,19 +271,25 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 
 		return (
 			<div>
-				<div className='bg-gray-50 px-4 py-3 border-b font-medium'>{zipContents.filename}</div>
+				<div className='bg-gray-50 px-4 py-3 border-b border-gray-200 font-medium'>
+					{zipContents.filename}
+				</div>
 				<div className='max-h-96 overflow-y-auto'>
 					{zipContents.files.map((file, index) => (
 						<div
 							key={index}
-							className={`px-4 py-2 border-b border-gray-100 flex items-center gap-3 hover:bg-gray-50 ${
+							className={`px-4 py-3 border-b border-gray-100 flex items-center gap-3 hover:bg-gray-50 ${
 								!file.is_dir ? 'cursor-pointer' : ''
 							}`}
 							onDoubleClick={() => handleZipFileDoubleClick(file)}
 							title={file.is_dir ? 'Directory' : 'Double-click to preview'}
 						>
 							<div className='w-5 text-center'>
-								{file.is_dir ? <Folder className='w-4 h-4' /> : <File className='w-4 h-4' />}
+								{file.is_dir ? (
+									<Folder className='w-4 h-4 text-gray-500' />
+								) : (
+									<File className='w-4 h-4 text-gray-500' />
+								)}
 							</div>
 							<div className='flex-1 font-mono text-sm select-none'>{file.name}</div>
 							<div className='text-xs text-gray-500 select-none'>{formatSize(file.size)}</div>
@@ -309,7 +307,7 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 		<div>
 			{isZipFile && (
 				<div className='mb-6'>
-					<div className='flex border-b border-gray-200 bg-white rounded-t-lg'>
+					<div className='flex border-b border-gray-200 bg-white'>
 						<button
 							className={`px-6 py-3 font-medium border-b-2 transition-colors ${
 								activeTab === 'preview'
@@ -334,7 +332,7 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 				</div>
 			)}
 
-			<div className='bg-white rounded-lg shadow-sm border overflow-hidden'>
+			<div className='card overflow-hidden'>
 				{activeTab === 'preview' ? (
 					<div className='p-6 min-h-96 flex items-center justify-center'>{renderPreview()}</div>
 				) : (
@@ -345,14 +343,14 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 			{/* ZIP File Preview Modal */}
 			{isZipFilePreviewOpen && zipFilePreview && (
 				<div
-					className='fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4'
+					className='fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4'
 					onClick={closeZipFilePreview}
 				>
 					<div
-						className='bg-white rounded-lg shadow-xl max-w-4xl max-h-[90vh] w-full overflow-hidden'
+						className='bg-white shadow-angular-xl max-w-4xl max-h-[90vh] w-full overflow-hidden'
 						onClick={(e) => e.stopPropagation()}
 					>
-						<div className='flex items-center justify-between p-4 border-b bg-gray-50'>
+						<div className='flex items-center justify-between p-4 border-b border-gray-200 bg-gray-50'>
 							<div className='flex-1'>
 								<h3 className='text-lg font-medium text-gray-900'>{zipFilePreview.file.name}</h3>
 								<p className='text-sm text-gray-500'>
@@ -365,21 +363,22 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 									</p>
 								)}
 							</div>
-							<div className='flex items-center gap-2'>
+							<div className='flex items-center gap-4'>
 								{zipContents && getPreviewableFiles().length > 1 && (
-									<div className='flex items-center gap-1 text-sm text-gray-500 mr-4'>
-										<span>← →</span>
-										<span>Navigate</span>
-										<span className='mx-2'>•</span>
-										<span>ESC</span>
-										<span>Close</span>
+									<div className='flex items-center gap-4 text-sm text-gray-500'>
+										<div className='flex items-center gap-1'>
+											<ChevronLeft className='w-4 h-4' />
+											<ChevronRight className='w-4 h-4' />
+											<span>Navigate</span>
+										</div>
+										<div className='flex items-center gap-1'>
+											<span>ESC</span>
+											<span>Close</span>
+										</div>
 									</div>
 								)}
-								<button
-									onClick={closeZipFilePreview}
-									className='text-gray-400 hover:text-gray-600 text-2xl font-bold'
-								>
-									×
+								<button onClick={closeZipFilePreview} className='text-gray-400 hover:text-gray-600'>
+									<X className='w-6 h-6' />
 								</button>
 							</div>
 						</div>
@@ -387,34 +386,20 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 							{renderZipFilePreview()}
 						</div>
 
-						{/* Navigation arrows (visible on hover) */}
+						{/* Navigation arrows */}
 						{zipContents && getPreviewableFiles().length > 1 && (
 							<>
 								<button
 									onClick={() => navigateToFile('prev')}
-									className='absolute left-4 top-1/2 transform -translate-y-1/2 bg-black bg-opacity-50 hover:bg-opacity-70 text-white p-2 rounded-full opacity-0 hover:opacity-100 transition-opacity'
+									className='absolute left-4 top-1/2 transform -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white p-3 transition-all'
 								>
-									<svg className='w-6 h-6' fill='none' stroke='currentColor' viewBox='0 0 24 24'>
-										<path
-											strokeLinecap='round'
-											strokeLinejoin='round'
-											strokeWidth={2}
-											d='M15 19l-7-7 7-7'
-										/>
-									</svg>
+									<ChevronLeft className='w-6 h-6' />
 								</button>
 								<button
 									onClick={() => navigateToFile('next')}
-									className='absolute right-4 top-1/2 transform -translate-y-1/2 bg-black bg-opacity-50 hover:bg-opacity-70 text-white p-2 rounded-full opacity-0 hover:opacity-100 transition-opacity'
+									className='absolute right-4 top-1/2 transform -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white p-3 transition-all'
 								>
-									<svg className='w-6 h-6' fill='none' stroke='currentColor' viewBox='0 0 24 24'>
-										<path
-											strokeLinecap='round'
-											strokeLinejoin='round'
-											strokeWidth={2}
-											d='M9 5l7 7-7 7'
-										/>
-									</svg>
+									<ChevronRight className='w-6 h-6' />
 								</button>
 							</>
 						)}
@@ -471,7 +456,7 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 				<div className='text-left'>
 					<iframe
 						src={previewUrl}
-						className='w-full h-96 border border-gray-300 rounded-lg bg-gray-50'
+						className='w-full h-96 border border-gray-300 bg-gray-50'
 						title='Text Preview'
 					/>
 				</div>
@@ -479,9 +464,9 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 		}
 
 		return (
-			<div className='text-center py-16 text-gray-500 bg-gray-50 rounded-lg'>
-				<div className='flex justify-center mb-4'>
-					<File className='w-12 h-12' />
+			<div className='text-center py-16 text-gray-500 bg-gray-50 border border-gray-200'>
+				<div className='w-12 h-12 bg-gray-100 mx-auto mb-4 flex items-center justify-center'>
+					<File className='w-6 h-6 text-gray-500' />
 				</div>
 				<div>Preview not supported for this file type.</div>
 				<div className='text-sm mt-2'>Content type: {contentType}</div>
