@@ -23,7 +23,7 @@ type FileService struct {
 func main() {
 	// Load configuration
 	config := LoadConfig()
-	
+
 	// Initialize Redis with optimized settings
 	redisClient := redis.NewClient(&redis.Options{
 		Addr:         config.RedisAddr,
@@ -56,19 +56,19 @@ func main() {
 
 	// Setup Gin router with optimizations
 	gin.SetMode(gin.DebugMode)
-	
+
 	router := gin.New()
-	
+
 	// Middleware for performance and security
 	router.Use(gin.Recovery())
 	router.Use(requestLoggingMiddleware())
 	router.Use(corsMiddleware())
 	router.Use(securityMiddleware())
 	router.Use(rateLimitMiddleware(config))
-	
+
 	// Add request timeout middleware
 	router.Use(timeoutMiddleware(config.RequestTimeout))
-	
+
 	// API routes MUST come before static file routes
 	api := router.Group("/api")
 	{
@@ -85,7 +85,7 @@ func main() {
 	// Serve static files (React build) - AFTER API routes
 	router.Static("/assets", "./static/assets")
 	router.StaticFile("/favicon.ico", "./static/favicon.ico")
-	router.StaticFile("/vite.svg", "./static/vite.svg")
+	router.StaticFile("/logo.svg", "./static/logo.svg")
 
 	// SPA routes - serve React app for any non-API route
 	router.NoRoute(func(c *gin.Context) {
@@ -106,21 +106,21 @@ func main() {
 	log.Printf("Server starting on %s:%s", config.Host, config.Port)
 	log.Printf("Max file size: %d MB", config.MaxFileSize/(1024*1024))
 	log.Printf("File retention: 24 hours")
-	
+
 	// Print all registered routes for debugging
 	routes := router.Routes()
 	log.Printf("Total routes registered: %d", len(routes))
 	for _, route := range routes {
 		log.Printf("Route: %s %s -> %s", route.Method, route.Path, route.Handler)
 	}
-	
+
 	server := &http.Server{
 		Addr:         config.Host + ":" + config.Port,
 		Handler:      router,
 		ReadTimeout:  config.RequestTimeout,
 		WriteTimeout: config.RequestTimeout,
 	}
-	
+
 	log.Fatal(server.ListenAndServe())
 }
 
@@ -153,7 +153,7 @@ func (s *FileService) cleanupExpiredFiles() {
 		Min: "0",
 		Max: fmt.Sprintf("%d", now.Unix()),
 	}).Result()
-	
+
 	if err != nil {
 		log.Printf("Error getting expired files: %v", err)
 		return
@@ -165,7 +165,7 @@ func (s *FileService) cleanupExpiredFiles() {
 		pipe.Del(ctx, "file:"+fileID)
 		pipe.Del(ctx, "content:"+fileID)
 		pipe.ZRem(ctx, "files", fileID)
-		
+
 		if _, err := pipe.Exec(ctx); err != nil {
 			log.Printf("Error deleting expired file %s: %v", fileID, err)
 		} else {

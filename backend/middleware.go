@@ -16,9 +16,9 @@ func requestLoggingMiddleware() gin.HandlerFunc {
 		start := time.Now()
 		path := c.Request.URL.Path
 		raw := c.Request.URL.RawQuery
-		
+
 		// Skip logging for health checks and static assets
-		if path == "/health" || path == "/favicon.ico" || path == "/vite.svg" {
+		if path == "/health" || path == "/favicon.ico" || path == "/logo.svg" {
 			c.Next()
 			return
 		}
@@ -32,7 +32,7 @@ func requestLoggingMiddleware() gin.HandlerFunc {
 		clientIP := c.ClientIP()
 		method := c.Request.Method
 		statusCode := c.Writer.Status()
-		
+
 		if raw != "" {
 			path = path + "?" + raw
 		}
@@ -87,7 +87,7 @@ func rateLimitMiddleware(config *Config) gin.HandlerFunc {
 	go func() {
 		ticker := time.NewTicker(time.Minute)
 		defer ticker.Stop()
-		
+
 		for range ticker.C {
 			mu.Lock()
 			now := time.Now()
@@ -156,12 +156,12 @@ func compressionMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Add compression headers
 		c.Header("Vary", "Accept-Encoding")
-		
+
 		// Check if client accepts compression
 		if c.GetHeader("Accept-Encoding") != "" {
 			c.Header("Content-Encoding", "gzip")
 		}
-		
+
 		c.Next()
 	}
 }
