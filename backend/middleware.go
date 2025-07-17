@@ -74,7 +74,7 @@ func corsMiddleware() gin.HandlerFunc {
 }
 
 // rateLimitMiddleware implements basic rate limiting
-func rateLimitMiddleware(config *Config) gin.HandlerFunc {
+func rateLimitMiddleware(_ *Config) gin.HandlerFunc {
 	type clientInfo struct {
 		lastRequest time.Time
 		requests    int
