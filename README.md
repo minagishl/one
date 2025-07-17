@@ -1,5 +1,7 @@
 # ONE
 
+![Preview](./images/preview.png)
+
 ONE is a fast and ultra-lightweight file storage service that enables you to securely upload, store, and preview files in your browser. With advanced compression, deduplication, and easy sharing features, ONE makes file management simple and efficient.
 
 ## Features
