@@ -1,5 +1,6 @@
 import React from 'react';
 import UploadArea from '../components/UploadArea';
+import Footer from '../components/Footer';
 import { CloudUpload, GalleryVerticalEnd, Clock4, LockKeyhole, Eye } from 'lucide-react';
 
 const HomePage: React.FC = () => {
@@ -88,13 +89,7 @@ const HomePage: React.FC = () => {
 			</main>
 
 			{/* Footer */}
-			<footer className='bg-white border-t border-gray-200 mt-20'>
-				<div className='max-w-6xl mx-auto px-6 py-8'>
-					<div className='text-center text-sm text-gray-500'>
-						<p>Secure file storage with automatic compression and expiry</p>
-					</div>
-				</div>
-			</footer>
+			<Footer />
 		</div>
 	);
 };
