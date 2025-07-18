@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -162,6 +163,24 @@ func compressionMiddleware() gin.HandlerFunc {
 			c.Header("Content-Encoding", "gzip")
 		}
 
+		c.Next()
+	}
+}
+
+// http2PushMiddleware adds HTTP/2 server push for media files
+func http2PushMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Check if this is a media file request
+		if strings.HasPrefix(c.Request.URL.Path, "/api/stream/") || strings.HasPrefix(c.Request.URL.Path, "/api/preview/") {
+			// Add HTTP/2 server push headers for better performance
+			c.Header("Link", "</static/assets/index.css>; rel=preload; as=style")
+			c.Header("Link", "</static/assets/index.js>; rel=preload; as=script")
+			
+			// Add performance hints
+			c.Header("X-DNS-Prefetch-Control", "on")
+			c.Header("X-Preload", "true")
+		}
+		
 		c.Next()
 	}
 }

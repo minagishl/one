@@ -3,6 +3,7 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -19,6 +20,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
+	"github.com/klauspost/compress/zstd"
+	"github.com/pierrec/lz4/v4"
 	"golang.org/x/text/encoding/japanese"
 	"golang.org/x/text/transform"
 )
@@ -422,15 +425,65 @@ func (s *FileService) previewFile(c *gin.Context) {
 		return
 	}
 
-	// Get file content
+	// Get file content reference
 	compressedContent, err := s.redis.Get(ctx, "content:"+fileID).Result()
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "File content not found"})
 		return
 	}
 
+	// Set appropriate headers for preview
+	c.Header("Content-Type", metadata.MimeType)
+	c.Header("Content-Length", strconv.FormatInt(metadata.Size, 10))
+	c.Header("Accept-Ranges", "bytes")
+
+	// Handle range requests for large files
+	rangeHeader := c.GetHeader("Range")
+	if rangeHeader != "" {
+		s.handleRangeRequest(c, compressedContent, metadata, rangeHeader)
+		return
+	}
+
+	// For media files, redirect to optimized streaming endpoint
+	if isMediaFile(metadata.MimeType) && metadata.Size > 5*1024*1024 { // 5MB threshold for media
+		// Add cache headers for media files
+		c.Header("Cache-Control", "public, max-age=3600")
+		c.Header("ETag", fmt.Sprintf("\"%s\"", fileID))
+		
+		// Check for conditional requests
+		if match := c.GetHeader("If-None-Match"); match != "" {
+			if strings.Trim(match, "\"") == fileID {
+				c.Status(http.StatusNotModified)
+				return
+			}
+		}
+		
+		s.streamMediaContent(c, compressedContent, metadata)
+		return
+	}
+	
+	// For large images, also add cache headers
+	if isImageFile(metadata.MimeType) && metadata.Size > 1*1024*1024 { // 1MB threshold for images
+		c.Header("Cache-Control", "public, max-age=3600")
+		c.Header("ETag", fmt.Sprintf("\"%s\"", fileID))
+		
+		// Check for conditional requests
+		if match := c.GetHeader("If-None-Match"); match != "" {
+			if strings.Trim(match, "\"") == fileID {
+				c.Status(http.StatusNotModified)
+				return
+			}
+		}
+	}
+
+	// For large files, use streaming
+	if metadata.Size > 10*1024*1024 { // 10MB threshold
+		s.streamFileContent(c, compressedContent, metadata)
+		return
+	}
+
+	// Small files - use existing logic
 	var content []byte
-	// Check if file is stored on disk
 	if strings.HasPrefix(compressedContent, "DISK:") {
 		// Read from disk
 		diskPath := strings.TrimPrefix(compressedContent, "DISK:")
@@ -455,11 +508,263 @@ func (s *FileService) previewFile(c *gin.Context) {
 		}
 	}
 
-	// Set appropriate headers for preview
+	c.Data(http.StatusOK, metadata.MimeType, content)
+}
+
+// fastStreamFile provides optimized streaming for large media files
+func (s *FileService) fastStreamFile(c *gin.Context) {
+	fileID := c.Param("id")
+	ctx := context.Background()
+
+	// Get metadata
+	metadataJSON, err := s.redis.Get(ctx, "file:"+fileID).Result()
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
+		return
+	}
+
+	var metadata FileMetadata
+	if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse metadata"})
+		return
+	}
+
+	// Check if file has expired
+	if metadata.ExpiresAt.Before(time.Now()) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "File has expired"})
+		return
+	}
+
+	// Check download password if required
+	if metadata.HasDownloadPassword {
+		providedPassword := c.Query("password")
+		if providedPassword != metadata.DownloadPassword {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error":   "Password required",
+				"message": "This file is password protected. Please provide the correct password.",
+			})
+			return
+		}
+	}
+
+	// Get file content reference
+	compressedContent, err := s.redis.Get(ctx, "content:"+fileID).Result()
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "File content not found"})
+		return
+	}
+
+	// Set optimized headers for media streaming
 	c.Header("Content-Type", metadata.MimeType)
 	c.Header("Content-Length", strconv.FormatInt(metadata.Size, 10))
+	c.Header("Accept-Ranges", "bytes")
+	c.Header("Cache-Control", "public, max-age=3600")
+	c.Header("ETag", fmt.Sprintf("\"%s\"", fileID))
 
-	c.Data(http.StatusOK, metadata.MimeType, content)
+	// Check for conditional requests (If-None-Match)
+	if match := c.GetHeader("If-None-Match"); match != "" {
+		if strings.Trim(match, "\"") == fileID {
+			c.Status(http.StatusNotModified)
+			return
+		}
+	}
+
+	// Handle range requests for media files
+	rangeHeader := c.GetHeader("Range")
+	if rangeHeader != "" {
+		s.handleOptimizedRangeRequest(c, compressedContent, metadata, rangeHeader)
+		return
+	}
+
+	// For large media files, use optimized streaming
+	s.streamMediaContent(c, compressedContent, metadata)
+}
+
+// streamMediaContent provides optimized streaming for media files
+func (s *FileService) streamMediaContent(c *gin.Context, compressedContent string, metadata FileMetadata) {
+	if strings.HasPrefix(compressedContent, "DISK:") {
+		// Stream directly from disk for best performance
+		diskPath := strings.TrimPrefix(compressedContent, "DISK:")
+		s.streamMediaFromDisk(c, diskPath, metadata)
+	} else {
+		// Stream from Redis
+		s.streamMediaFromRedis(c, compressedContent, metadata)
+	}
+}
+
+// streamMediaFromDisk optimized disk streaming for media files
+func (s *FileService) streamMediaFromDisk(c *gin.Context, diskPath string, metadata FileMetadata) {
+	// Open file directly for uncompressed files (media files are typically uncompressed)
+	if metadata.Compression == CompressionNone {
+		file, err := os.Open(diskPath)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to open file"})
+			return
+		}
+		defer file.Close()
+
+		// Set response headers
+		c.Writer.Header().Set("Content-Type", metadata.MimeType)
+		c.Writer.Header().Set("Content-Length", strconv.FormatInt(metadata.Size, 10))
+		c.Writer.WriteHeader(http.StatusOK)
+
+		// Use larger buffer for media files (1MB for better throughput)
+		buffer := make([]byte, 1024*1024)
+		_, err = io.CopyBuffer(c.Writer, file, buffer)
+		if err != nil {
+			log.Printf("Error streaming media file: %v", err)
+		}
+		return
+	}
+
+	// Fallback to compressed streaming
+	s.streamFromDisk(c, diskPath, metadata)
+}
+
+// streamMediaFromRedis optimized Redis streaming for media files
+func (s *FileService) streamMediaFromRedis(c *gin.Context, compressedContent string, metadata FileMetadata) {
+	// Decompress if needed
+	var content []byte
+	var err error
+
+	if metadata.Compression == CompressionNone {
+		content = []byte(compressedContent)
+	} else {
+		content, err = s.compressor.Decompress([]byte(compressedContent), metadata.Compression)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decompress file"})
+			return
+		}
+	}
+
+	// Set response headers
+	c.Writer.Header().Set("Content-Type", metadata.MimeType)
+	c.Writer.Header().Set("Content-Length", strconv.FormatInt(metadata.Size, 10))
+	c.Writer.WriteHeader(http.StatusOK)
+
+	// Stream with larger buffer for media files
+	reader := bytes.NewReader(content)
+	buffer := make([]byte, 1024*1024) // 1MB buffer
+	_, err = io.CopyBuffer(c.Writer, reader, buffer)
+	if err != nil {
+		log.Printf("Error streaming media file: %v", err)
+	}
+}
+
+// handleOptimizedRangeRequest handles range requests with optimizations for media files
+func (s *FileService) handleOptimizedRangeRequest(c *gin.Context, compressedContent string, metadata FileMetadata, rangeHeader string) {
+	// Parse range header
+	ranges, err := parseRangeHeader(rangeHeader, metadata.Size)
+	if err != nil {
+		c.Header("Content-Range", fmt.Sprintf("bytes */%d", metadata.Size))
+		c.Status(http.StatusRequestedRangeNotSatisfiable)
+		return
+	}
+
+	if len(ranges) != 1 {
+		// Multi-range not supported
+		c.Header("Content-Range", fmt.Sprintf("bytes */%d", metadata.Size))
+		c.Status(http.StatusRequestedRangeNotSatisfiable)
+		return
+	}
+
+	rangeSpec := ranges[0]
+	contentLength := rangeSpec.end - rangeSpec.start + 1
+
+	// Set headers for partial content
+	c.Header("Content-Range", fmt.Sprintf("bytes %d-%d/%d", rangeSpec.start, rangeSpec.end, metadata.Size))
+	c.Header("Content-Length", strconv.FormatInt(contentLength, 10))
+	c.Header("Content-Type", metadata.MimeType)
+	c.Header("Cache-Control", "public, max-age=3600")
+	c.Status(http.StatusPartialContent)
+
+	// Stream the requested range with optimizations
+	if strings.HasPrefix(compressedContent, "DISK:") {
+		diskPath := strings.TrimPrefix(compressedContent, "DISK:")
+		s.streamOptimizedRangeFromDisk(c, diskPath, metadata, rangeSpec)
+	} else {
+		s.streamOptimizedRangeFromRedis(c, compressedContent, metadata, rangeSpec)
+	}
+}
+
+// streamOptimizedRangeFromDisk optimized range streaming from disk
+func (s *FileService) streamOptimizedRangeFromDisk(c *gin.Context, diskPath string, metadata FileMetadata, rangeSpec Range) {
+	// For uncompressed files, seek directly (most efficient)
+	if metadata.Compression == CompressionNone {
+		file, err := os.Open(diskPath)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to open file"})
+			return
+		}
+		defer file.Close()
+
+		// Seek to start position
+		if _, err := file.Seek(rangeSpec.start, 0); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to seek file"})
+			return
+		}
+
+		// Stream the requested range with optimized buffer
+		contentLength := rangeSpec.end - rangeSpec.start + 1
+		buffer := make([]byte, 256*1024) // 256KB buffer for range requests
+		remaining := contentLength
+
+		for remaining > 0 {
+			toRead := int64(len(buffer))
+			if remaining < toRead {
+				toRead = remaining
+			}
+
+			n, err := file.Read(buffer[:toRead])
+			if err != nil && err != io.EOF {
+				log.Printf("Error reading file range: %v", err)
+				return
+			}
+
+			if n == 0 {
+				break
+			}
+
+			if _, err := c.Writer.Write(buffer[:n]); err != nil {
+				log.Printf("Error writing range response: %v", err)
+				return
+			}
+			remaining -= int64(n)
+		}
+		return
+	}
+
+	// Fallback to compressed range streaming
+	s.streamRangeFromDisk(c, diskPath, metadata, rangeSpec)
+}
+
+// streamOptimizedRangeFromRedis optimized range streaming from Redis
+func (s *FileService) streamOptimizedRangeFromRedis(c *gin.Context, compressedContent string, metadata FileMetadata, rangeSpec Range) {
+	// Decompress if needed
+	var content []byte
+	var err error
+
+	if metadata.Compression == CompressionNone {
+		content = []byte(compressedContent)
+	} else {
+		content, err = s.compressor.Decompress([]byte(compressedContent), metadata.Compression)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decompress file"})
+			return
+		}
+	}
+
+	// Validate range
+	if rangeSpec.start >= int64(len(content)) || rangeSpec.end >= int64(len(content)) {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid range"})
+		return
+	}
+
+	// Stream the requested range
+	rangeContent := content[rangeSpec.start : rangeSpec.end+1]
+	if _, err := c.Writer.Write(rangeContent); err != nil {
+		log.Printf("Error writing range response: %v", err)
+	}
 }
 
 func isPreviewable(mimeType string) bool {
@@ -474,6 +779,14 @@ func isPreviewable(mimeType string) bool {
 		}
 	}
 	return false
+}
+
+func isMediaFile(mimeType string) bool {
+	return strings.HasPrefix(mimeType, "video/") || strings.HasPrefix(mimeType, "audio/")
+}
+
+func isImageFile(mimeType string) bool {
+	return strings.HasPrefix(mimeType, "image/")
 }
 
 func (s *FileService) getMetadata(c *gin.Context) {
@@ -763,4 +1076,284 @@ func (s *FileService) extractZipFile(c *gin.Context) {
 	c.Header("Content-Disposition", fmt.Sprintf("inline; filename=%s", detectAndConvertFilename(targetFile.Name)))
 
 	c.Data(http.StatusOK, mimeType, fileContent)
+}
+
+// streamFileContent streams large files to avoid memory issues
+func (s *FileService) streamFileContent(c *gin.Context, compressedContent string, metadata FileMetadata) {
+	if strings.HasPrefix(compressedContent, "DISK:") {
+		// Stream from disk
+		diskPath := strings.TrimPrefix(compressedContent, "DISK:")
+		s.streamFromDisk(c, diskPath, metadata)
+	} else {
+		// Stream from Redis (less common for large files)
+		s.streamFromRedis(c, compressedContent, metadata)
+	}
+}
+
+// streamFromDisk streams file content from disk with compression support
+func (s *FileService) streamFromDisk(c *gin.Context, diskPath string, metadata FileMetadata) {
+	// Open compressed file
+	file, err := os.Open(diskPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to open file from disk"})
+		return
+	}
+	defer file.Close()
+
+	// Create decompression reader based on compression type
+	var reader io.Reader
+	switch metadata.Compression {
+	case CompressionNone:
+		reader = file
+	case CompressionGzip:
+		gzReader, err := gzip.NewReader(file)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create gzip reader"})
+			return
+		}
+		defer gzReader.Close()
+		reader = gzReader
+	case CompressionZstd:
+		zstdReader, err := zstd.NewReader(file)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create zstd reader"})
+			return
+		}
+		defer zstdReader.Close()
+		reader = zstdReader
+	case CompressionLZ4:
+		lz4Reader := lz4.NewReader(file)
+		reader = lz4Reader
+	default:
+		reader = file
+	}
+
+	// Stream content to client
+	c.Writer.Header().Set("Content-Type", metadata.MimeType)
+	c.Writer.Header().Set("Content-Length", strconv.FormatInt(metadata.Size, 10))
+	c.Writer.WriteHeader(http.StatusOK)
+
+	// Copy with buffering to control memory usage
+	buffer := make([]byte, 64*1024) // 64KB buffer
+	_, err = io.CopyBuffer(c.Writer, reader, buffer)
+	if err != nil {
+		log.Printf("Error streaming file: %v", err)
+	}
+}
+
+// streamFromRedis streams file content from Redis (for smaller large files)
+func (s *FileService) streamFromRedis(c *gin.Context, compressedContent string, metadata FileMetadata) {
+	// Decompress content
+	content, err := s.compressor.Decompress([]byte(compressedContent), metadata.Compression)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decompress file"})
+		return
+	}
+
+	// Stream to client
+	c.Writer.Header().Set("Content-Type", metadata.MimeType)
+	c.Writer.Header().Set("Content-Length", strconv.FormatInt(metadata.Size, 10))
+	c.Writer.WriteHeader(http.StatusOK)
+
+	// Write in chunks to avoid memory spikes
+	reader := bytes.NewReader(content)
+	buffer := make([]byte, 64*1024) // 64KB buffer
+	_, err = io.CopyBuffer(c.Writer, reader, buffer)
+	if err != nil {
+		log.Printf("Error streaming file: %v", err)
+	}
+}
+
+// handleRangeRequest handles HTTP Range requests for partial content
+func (s *FileService) handleRangeRequest(c *gin.Context, compressedContent string, metadata FileMetadata, rangeHeader string) {
+	// Parse range header
+	ranges, err := parseRangeHeader(rangeHeader, metadata.Size)
+	if err != nil {
+		c.Header("Content-Range", fmt.Sprintf("bytes */%d", metadata.Size))
+		c.Status(http.StatusRequestedRangeNotSatisfiable)
+		return
+	}
+
+	if len(ranges) != 1 {
+		// Multi-range not supported for now
+		c.Header("Content-Range", fmt.Sprintf("bytes */%d", metadata.Size))
+		c.Status(http.StatusRequestedRangeNotSatisfiable)
+		return
+	}
+
+	rangeSpec := ranges[0]
+	contentLength := rangeSpec.end - rangeSpec.start + 1
+
+	// Set headers for partial content
+	c.Header("Content-Range", fmt.Sprintf("bytes %d-%d/%d", rangeSpec.start, rangeSpec.end, metadata.Size))
+	c.Header("Content-Length", strconv.FormatInt(contentLength, 10))
+	c.Header("Content-Type", metadata.MimeType)
+	c.Status(http.StatusPartialContent)
+
+	// Stream the requested range
+	if strings.HasPrefix(compressedContent, "DISK:") {
+		diskPath := strings.TrimPrefix(compressedContent, "DISK:")
+		s.streamRangeFromDisk(c, diskPath, metadata, rangeSpec)
+	} else {
+		s.streamRangeFromRedis(c, compressedContent, metadata, rangeSpec)
+	}
+}
+
+// Range represents a byte range
+type Range struct {
+	start int64
+	end   int64
+}
+
+// parseRangeHeader parses HTTP Range header
+func parseRangeHeader(rangeHeader string, fileSize int64) ([]Range, error) {
+	// Remove "bytes=" prefix
+	rangeHeader = strings.TrimPrefix(rangeHeader, "bytes=")
+	
+	// Parse range specifications
+	rangeSpecs := strings.Split(rangeHeader, ",")
+	var ranges []Range
+	
+	for _, spec := range rangeSpecs {
+		spec = strings.TrimSpace(spec)
+		if spec == "" {
+			continue
+		}
+		
+		// Parse individual range spec
+		if strings.HasPrefix(spec, "-") {
+			// Suffix range: -500 (last 500 bytes)
+			suffix, err := strconv.ParseInt(spec[1:], 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("invalid range suffix: %s", spec)
+			}
+			start := fileSize - suffix
+			if start < 0 {
+				start = 0
+			}
+			ranges = append(ranges, Range{start: start, end: fileSize - 1})
+		} else if strings.HasSuffix(spec, "-") {
+			// Start range: 500- (from byte 500 to end)
+			start, err := strconv.ParseInt(spec[:len(spec)-1], 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("invalid range start: %s", spec)
+			}
+			if start >= fileSize {
+				return nil, fmt.Errorf("range start beyond file size")
+			}
+			ranges = append(ranges, Range{start: start, end: fileSize - 1})
+		} else {
+			// Full range: 500-1000
+			parts := strings.Split(spec, "-")
+			if len(parts) != 2 {
+				return nil, fmt.Errorf("invalid range format: %s", spec)
+			}
+			start, err := strconv.ParseInt(parts[0], 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("invalid range start: %s", parts[0])
+			}
+			end, err := strconv.ParseInt(parts[1], 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("invalid range end: %s", parts[1])
+			}
+			if start > end || start >= fileSize {
+				return nil, fmt.Errorf("invalid range: %d-%d", start, end)
+			}
+			if end >= fileSize {
+				end = fileSize - 1
+			}
+			ranges = append(ranges, Range{start: start, end: end})
+		}
+	}
+	
+	return ranges, nil
+}
+
+// streamRangeFromDisk streams a specific range from disk
+func (s *FileService) streamRangeFromDisk(c *gin.Context, diskPath string, metadata FileMetadata, rangeSpec Range) {
+	// For compressed files, we need to decompress first (less efficient for ranges)
+	// In a production system, consider storing large files uncompressed for better range support
+	if metadata.Compression != CompressionNone {
+		// Decompress entire file first (not ideal but necessary for compressed files)
+		file, err := os.Open(diskPath)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to open file"})
+			return
+		}
+		defer file.Close()
+
+		content, err := s.compressor.Decompress(readFileContent(file), metadata.Compression)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decompress file"})
+			return
+		}
+
+		// Stream the requested range
+		rangeContent := content[rangeSpec.start : rangeSpec.end+1]
+		c.Writer.Write(rangeContent)
+		return
+	}
+
+	// For uncompressed files, we can seek directly
+	file, err := os.Open(diskPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to open file"})
+		return
+	}
+	defer file.Close()
+
+	// Seek to start position
+	if _, err := file.Seek(rangeSpec.start, 0); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to seek file"})
+		return
+	}
+
+	// Stream the requested range
+	contentLength := rangeSpec.end - rangeSpec.start + 1
+	buffer := make([]byte, 64*1024) // 64KB buffer
+	remaining := contentLength
+
+	for remaining > 0 {
+		toRead := int64(len(buffer))
+		if remaining < toRead {
+			toRead = remaining
+		}
+
+		n, err := file.Read(buffer[:toRead])
+		if err != nil && err != io.EOF {
+			log.Printf("Error reading file range: %v", err)
+			return
+		}
+
+		if n == 0 {
+			break
+		}
+
+		c.Writer.Write(buffer[:n])
+		remaining -= int64(n)
+	}
+}
+
+// streamRangeFromRedis streams a specific range from Redis
+func (s *FileService) streamRangeFromRedis(c *gin.Context, compressedContent string, metadata FileMetadata, rangeSpec Range) {
+	// Decompress content
+	content, err := s.compressor.Decompress([]byte(compressedContent), metadata.Compression)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decompress file"})
+		return
+	}
+
+	// Stream the requested range
+	rangeContent := content[rangeSpec.start : rangeSpec.end+1]
+	c.Writer.Write(rangeContent)
+}
+
+// readFileContent reads all content from a file
+func readFileContent(file *os.File) []byte {
+	content, err := io.ReadAll(file)
+	if err != nil {
+		log.Printf("Error reading file content: %v", err)
+		return nil
+	}
+	return content
 }

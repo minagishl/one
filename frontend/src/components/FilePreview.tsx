@@ -1,7 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { AlertTriangle, File, Folder, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { FileMetadata, ZipContents, ZipFile } from '../types';
-import { getFilePreview, getZipContents, getZipFilePreview } from '../utils/api';
+import {
+	getFilePreview,
+	getFilePreviewWithProgress,
+	getZipContents,
+	getZipFilePreview,
+} from '../utils/api';
 import { formatSize, formatDate } from '../utils/format';
 
 interface FilePreviewProps {
@@ -21,6 +26,8 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 		currentIndex: number;
 	} | null>(null);
 	const [isZipFilePreviewOpen, setIsZipFilePreviewOpen] = useState(false);
+	const [isLoading, setIsLoading] = useState(false);
+	const [loadingProgress, setLoadingProgress] = useState(0);
 
 	useEffect(() => {
 		loadPreview();
@@ -73,10 +80,31 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 				URL.revokeObjectURL(previewUrl);
 			}
 
-			const { blob } = await getFilePreview(fileId);
-			const url = URL.createObjectURL(blob);
-			setPreviewUrl(url);
+			setIsLoading(true);
+			setLoadingProgress(0);
 			setError('');
+
+			// Check if file is large (>50MB) and show special handling
+			const isLargeFile = metadata.size > 50 * 1024 * 1024;
+			const isMediaFile = metadata.mime_type.startsWith('video/') || metadata.mime_type.startsWith('audio/');
+
+			// For large media files, skip blob loading and use direct streaming
+			if (isMediaFile && metadata.size > 5 * 1024 * 1024) {
+				// Don't load blob for media files, use direct streaming URL
+				setPreviewUrl(`/api/stream/${fileId}`);
+			} else if (isLargeFile) {
+				// For large non-media files, show progress and optimize loading
+				const { blob } = await getFilePreviewWithProgress(fileId, (progress) => {
+					setLoadingProgress(progress);
+				});
+				const url = URL.createObjectURL(blob);
+				setPreviewUrl(url);
+			} else {
+				// For smaller files, use normal loading
+				const { blob } = await getFilePreview(fileId);
+				const url = URL.createObjectURL(blob);
+				setPreviewUrl(url);
+			}
 		} catch (err: any) {
 			console.error('Error loading preview:', err);
 			if (err.message && err.message.includes('Password required')) {
@@ -90,6 +118,8 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 			} else {
 				setError('Failed to load preview');
 			}
+		} finally {
+			setIsLoading(false);
 		}
 	};
 
@@ -189,10 +219,27 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 		}
 
 		if (!previewUrl) {
+			const isLargeFile = metadata.size > 50 * 1024 * 1024;
+
 			return (
 				<div className='text-center py-16 text-gray-500'>
 					<div className='animate-spin w-8 h-8 border-2 border-gray-200 border-t-primary-500 rounded-full mx-auto mb-4'></div>
 					<div>Loading preview...</div>
+					{isLargeFile && (
+						<div className='mt-4 max-w-xs mx-auto'>
+							<div className='text-sm text-gray-600 mb-2'>
+								Large file detected ({formatSize(metadata.size)})
+							</div>
+							{isLoading && loadingProgress > 0 && (
+								<div className='w-full bg-gray-200 h-2'>
+									<div
+										className='bg-primary-500 h-2 transition-all duration-300'
+										style={{ width: `${loadingProgress}%` }}
+									></div>
+								</div>
+							)}
+						</div>
+					)}
 				</div>
 			);
 		}
@@ -200,28 +247,56 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 		const { mime_type } = metadata;
 
 		if (mime_type.startsWith('image/')) {
+			const isLargeImage = metadata.size > 1 * 1024 * 1024; // 1MB threshold
+			
 			return (
 				<img
 					src={previewUrl}
 					alt={metadata.filename}
 					className='max-w-full max-h-[80vh] object-contain mx-auto'
+					loading={isLargeImage ? 'lazy' : 'eager'}
+					onLoad={() => setIsLoading(false)}
+					onError={() => setError('Failed to load image')}
+					style={{ 
+						transition: 'opacity 0.3s ease',
+						opacity: isLoading ? 0.7 : 1 
+					}}
 				/>
 			);
 		}
 
 		if (mime_type.startsWith('video/')) {
+			// For large video files, use optimized streaming endpoint
+			const isLargeVideo = metadata.size > 5 * 1024 * 1024; // 5MB threshold
+			const streamUrl = isLargeVideo ? `/api/stream/${fileId}` : previewUrl;
+			
 			return (
-				<video controls className='max-w-full max-h-[80vh] mx-auto' src={previewUrl}>
+				<video 
+					controls 
+					className='max-w-full max-h-[80vh] mx-auto' 
+					src={streamUrl}
+					preload={isLargeVideo ? 'metadata' : 'auto'}
+					crossOrigin="anonymous"
+				>
 					Your browser does not support the video tag.
 				</video>
 			);
 		}
 
 		if (mime_type.startsWith('audio/')) {
+			// For large audio files, use optimized streaming endpoint
+			const isLargeAudio = metadata.size > 5 * 1024 * 1024; // 5MB threshold
+			const streamUrl = isLargeAudio ? `/api/stream/${fileId}` : previewUrl;
+			
 			return (
 				<div className='flex justify-center'>
-					<audio controls className='w-full max-w-lg'>
-						<source src={previewUrl} type={mime_type} />
+					<audio 
+						controls 
+						className='w-full max-w-lg'
+						preload={isLargeAudio ? 'metadata' : 'auto'}
+						crossOrigin="anonymous"
+					>
+						<source src={streamUrl} type={mime_type} />
 						Your browser does not support the audio tag.
 					</audio>
 				</div>
@@ -237,8 +312,19 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 			mime_type === 'application/json' ||
 			mime_type === 'application/xml'
 		) {
+			// For very large text files, show a warning and partial content
+			const isVeryLargeText = metadata.size > 10 * 1024 * 1024; // 10MB threshold
+
 			return (
 				<div className='text-left'>
+					{isVeryLargeText && (
+						<div className='mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded'>
+							<div className='text-sm text-yellow-800'>
+								Large text file ({formatSize(metadata.size)}) - content may be truncated for
+								performance
+							</div>
+						</div>
+					)}
 					<iframe
 						src={previewUrl}
 						className='w-full h-96 border border-gray-300 bg-gray-50'
@@ -425,17 +511,32 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 		}
 
 		if (contentType.startsWith('video/')) {
+			// For large video files, show loading optimization
+			const isLargeVideo = zipFilePreview.file.size > 5 * 1024 * 1024;
+			
 			return (
-				<video controls className='max-w-full max-h-[60vh] mx-auto' src={previewUrl}>
+				<video 
+					controls 
+					className='max-w-full max-h-[60vh] mx-auto' 
+					src={previewUrl}
+					preload={isLargeVideo ? 'metadata' : 'auto'}
+				>
 					Your browser does not support the video tag.
 				</video>
 			);
 		}
 
 		if (contentType.startsWith('audio/')) {
+			// For large audio files, show loading optimization
+			const isLargeAudio = zipFilePreview.file.size > 5 * 1024 * 1024;
+			
 			return (
 				<div className='flex justify-center'>
-					<audio controls className='w-full max-w-lg'>
+					<audio 
+						controls 
+						className='w-full max-w-lg'
+						preload={isLargeAudio ? 'metadata' : 'auto'}
+					>
 						<source src={previewUrl} type={contentType} />
 						Your browser does not support the audio tag.
 					</audio>

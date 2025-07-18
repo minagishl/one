@@ -68,6 +68,7 @@ func main() {
 	router.Use(corsMiddleware())
 	router.Use(securityMiddleware())
 	router.Use(rateLimitMiddleware(config))
+	router.Use(http2PushMiddleware())
 
 	// Add request timeout middleware
 	router.Use(timeoutMiddleware(config.RequestTimeout))
@@ -86,6 +87,7 @@ func main() {
 		api.DELETE("/file/:id", service.deleteFile)
 		api.GET("/metadata/:id", service.getMetadata)
 		api.GET("/preview/:id", service.previewFile)
+		api.GET("/stream/:id", service.fastStreamFile) // Optimized streaming endpoint
 		// ZIP file extraction endpoint with query parameter
 		api.GET("/zip/:id/extract", service.extractZipFile)
 		api.GET("/zip/:id", service.browseZip)

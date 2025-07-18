@@ -52,6 +52,17 @@ func (cm *CompressionManager) SelectCompressionType(filename string, size int64)
 		return CompressionNone
 	}
 
+	// For very large files (>500MB), skip compression to avoid memory issues and improve performance
+	if size > 500*1024*1024 {
+		log.Printf("Skipping compression for very large file: %s (%d bytes)", filename, size)
+		return CompressionNone
+	}
+
+	// For large files (>100MB), use fast compression only
+	if size > 100*1024*1024 {
+		return CompressionLZ4
+	}
+
 	// For small files, use LZ4 for speed
 	if size < 1024*10 { // 10KB
 		return CompressionLZ4
@@ -62,8 +73,8 @@ func (cm *CompressionManager) SelectCompressionType(filename string, size int64)
 		return CompressionZstd
 	}
 
-	// For large files, use Gzip for maximum compression
-	return CompressionGzip
+	// For moderately large files, use LZ4 for better performance
+	return CompressionLZ4
 }
 
 func (cm *CompressionManager) Compress(data []byte, compressionType CompressionType) ([]byte, error) {

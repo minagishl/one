@@ -128,6 +128,64 @@ export const getFilePreview = async (
 	return { blob, contentType };
 };
 
+export const getFilePreviewWithProgress = async (
+	fileId: string,
+	onProgress: (progress: number) => void,
+	password?: string
+): Promise<{ blob: Blob; contentType: string }> => {
+	const url = new URL(`/api/preview/${fileId}`, window.location.origin);
+	if (password) {
+		url.searchParams.append('password', password);
+	}
+
+	const response = await fetch(url.toString());
+	if (!response.ok) {
+		if (response.status === 401) {
+			throw new Error('Password required');
+		}
+		throw new Error('File not found or expired');
+	}
+
+	const contentLength = response.headers.get('content-length');
+	const total = contentLength ? parseInt(contentLength, 10) : 0;
+	const contentType = response.headers.get('content-type') || 'application/octet-stream';
+
+	if (!response.body) {
+		throw new Error('Response body is null');
+	}
+
+	const reader = response.body.getReader();
+	const chunks: Uint8Array[] = [];
+	let receivedLength = 0;
+
+	// Read stream with progress tracking
+	while (true) {
+		const { done, value } = await reader.read();
+
+		if (done) break;
+
+		chunks.push(value);
+		receivedLength += value.length;
+
+		if (total > 0) {
+			const progress = Math.round((receivedLength / total) * 100);
+			onProgress(progress);
+		}
+	}
+
+	// Combine chunks into single Uint8Array
+	const combinedChunks = new Uint8Array(receivedLength);
+	let position = 0;
+	for (const chunk of chunks) {
+		combinedChunks.set(chunk, position);
+		position += chunk.length;
+	}
+
+	const blob = new Blob([combinedChunks], { type: contentType });
+
+	return { blob, contentType };
+};
+
 export const getZipContents = async (fileId: string): Promise<ZipContents> => {
 	const response = await fetch(`/api/zip/${fileId}`);
 	const data = await response.json();
