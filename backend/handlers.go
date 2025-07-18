@@ -173,6 +173,17 @@ func (s *FileService) uploadFile(c *gin.Context) {
 	}
 	defer file.Close()
 
+	// Check if file exceeds chunk threshold
+	if header.Size > s.config.ChunkThreshold {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{
+			"error": "File too large for standard upload",
+			"message": "Files larger than 100MB must use chunked upload",
+			"max_size": s.config.ChunkThreshold,
+			"use_chunked": true,
+		})
+		return
+	}
+
 	// Read file content
 	content, err := io.ReadAll(file)
 	if err != nil {

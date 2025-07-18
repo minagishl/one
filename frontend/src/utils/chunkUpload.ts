@@ -26,7 +26,7 @@ export interface UploadSession {
 }
 
 export class ChunkUploader {
-	private static readonly DEFAULT_CHUNK_SIZE = 100 * 1024 * 1024; // 100MB (optimized for fewer requests)
+	private static readonly DEFAULT_CHUNK_SIZE = 50 * 1024 * 1024; // 50MB (optimized for better progress tracking)
 	private static readonly MAX_RETRIES = 3;
 	private static readonly RETRY_DELAY = 2000; // 2 seconds (increased for larger chunks)
 
@@ -247,8 +247,8 @@ export class ChunkUploader {
 }
 
 // Helper function to determine if file should use chunk upload
-export function shouldUseChunkUpload(file: File, threshold: number = 200 * 1024 * 1024): boolean {
-	return file.size > threshold; // Default: 200MB threshold (optimized for fewer requests)
+export function shouldUseChunkUpload(file: File, threshold: number = 100 * 1024 * 1024): boolean {
+	return file.size > threshold; // Default: 100MB threshold (optimized for fewer requests)
 }
 
 // Helper function to format upload progress

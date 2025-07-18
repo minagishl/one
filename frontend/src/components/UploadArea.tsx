@@ -240,7 +240,10 @@ const UploadArea: React.FC<UploadAreaProps> = ({ onUploadComplete }) => {
 				<h3 className='text-2xl font-medium mb-4 text-gray-900'>
 					Drop files here or click to upload
 				</h3>
-				<p className='text-gray-600 text-lg mb-8'>Files expire automatically after 24 hours</p>
+				<p className='text-gray-600 text-lg mb-2'>Files expire automatically after 24 hours</p>
+				<p className='text-gray-500 text-sm mb-8'>
+					Files larger than 100MB will use chunked upload for better reliability
+				</p>
 
 				<button className='btn-primary'>Choose Files</button>
 
@@ -264,14 +267,27 @@ const UploadArea: React.FC<UploadAreaProps> = ({ onUploadComplete }) => {
 							<div key={index} className='card p-6'>
 								<div className='flex items-center justify-between mb-3'>
 									<div className='flex items-center gap-3'>
-										<div className='w-10 h-10 bg-primary-500 flex items-center justify-center'>
+										<div
+											className={`w-10 h-10 ${
+												progress.isChunkUpload ? 'bg-orange-500' : 'bg-primary-500'
+											} flex items-center justify-center`}
+										>
 											<FileText className='w-5 h-5 text-white' />
 										</div>
 										<div className='flex flex-col'>
 											<span className='font-medium text-gray-900'>{progress.filename}</span>
-											<span className='text-xs text-gray-600'>
-												{progress.chunkProgress ?? 'Uploading...'}
-											</span>
+											<div className='flex items-center gap-2'>
+												<span className='text-xs text-gray-600'>
+													{progress.isChunkUpload
+														? progress.chunkProgress ?? 'Preparing chunked upload...'
+														: 'Uploading...'}
+												</span>
+												{progress.isChunkUpload && (
+													<span className='text-xs text-orange-600 font-medium'>
+														Large file - Using chunked upload
+													</span>
+												)}
+											</div>
 										</div>
 									</div>
 									<span className='text-sm text-gray-600'>{progress.progress}%</span>

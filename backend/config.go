@@ -20,6 +20,7 @@ type Config struct {
 	MaxFileSize       int64
 	MaxFilesPerUser   int
 	AllowedExtensions []string
+	ChunkThreshold    int64 // Files larger than this will use chunked upload
 
 	// Chunk upload settings
 	ChunkSize        int64
@@ -49,10 +50,11 @@ func LoadConfig() *Config {
 		MaxFileSize:       getEnvInt64("MAX_FILE_SIZE", 10*1024*1024*1024), // 10GB
 		MaxFilesPerUser:   getEnvInt("MAX_FILES_PER_USER", 1000),
 		AllowedExtensions: []string{}, // Empty means all extensions allowed
+		ChunkThreshold:    getEnvInt64("CHUNK_THRESHOLD", 100*1024*1024), // 100MB threshold
 
 		// Chunk upload settings
-		ChunkSize:        getEnvInt64("CHUNK_SIZE", 100*1024*1024), // 100MB chunks (optimized for fewer requests)
-		MaxChunksPerFile: getEnvInt("MAX_CHUNKS_PER_FILE", 100),    // 100 chunks max (10GB total)
+		ChunkSize:        getEnvInt64("CHUNK_SIZE", 50*1024*1024), // 50MB chunks (optimized for better progress tracking)
+		MaxChunksPerFile: getEnvInt("MAX_CHUNKS_PER_FILE", 200),   // 200 chunks max (10GB total)
 		TempDir:          getEnv("TEMP_DIR", "./temp"),
 		ChunkTimeout:     getEnvDuration("CHUNK_TIMEOUT", "30m"), // Increased timeout for larger chunks
 

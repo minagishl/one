@@ -1,6 +1,15 @@
 import { FileMetadata, UploadResult, ZipContents } from '../types';
 
 export const uploadFile = async (file: File, downloadPassword?: string): Promise<UploadResult> => {
+	// Check if file is too large for standard upload
+	if (file.size > 100 * 1024 * 1024) {
+		return {
+			success: false,
+			filename: file.name,
+			error: 'File too large for standard upload. Files larger than 100MB will use chunked upload automatically.',
+		};
+	}
+
 	const formData = new FormData();
 	formData.append('file', file);
 	if (downloadPassword) {
@@ -24,6 +33,14 @@ export const uploadFile = async (file: File, downloadPassword?: string): Promise
 				delete_password: result.metadata.delete_password,
 			};
 		} else {
+			// Check if server recommends chunked upload
+			if (response.status === 413 && result.use_chunked) {
+				return {
+					success: false,
+					filename: file.name,
+					error: 'File too large for standard upload. Use chunked upload instead.',
+				};
+			}
 			return {
 				success: false,
 				filename: file.name,
