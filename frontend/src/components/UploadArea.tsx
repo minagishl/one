@@ -278,7 +278,7 @@ const UploadArea: React.FC<UploadAreaProps> = ({ onUploadComplete }) => {
 								</div>
 
 								{/* Progress bar */}
-								<div className='w-full bg-gray-200 h-2 mb-3'>
+								<div className='w-full bg-gray-200 h-2'>
 									<div
 										className='bg-primary-500 h-2 transition-all duration-300'
 										style={{ width: `${progress.progress}%` }}
@@ -286,12 +286,12 @@ const UploadArea: React.FC<UploadAreaProps> = ({ onUploadComplete }) => {
 								</div>
 
 								{/* Retry indicator */}
-								{progress.retryCount && progress.retryCount > 0 && (
+								{progress.retryCount && progress.retryCount > 0 ? (
 									<div className='flex items-center gap-1 text-xs text-orange-600'>
 										<RefreshCw className='w-3 h-3' />
 										Retrying... (attempt {progress.retryCount})
 									</div>
-								)}
+								) : null}
 
 								{/* Error indicator */}
 								{progress.error && (
