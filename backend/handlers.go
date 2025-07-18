@@ -166,6 +166,15 @@ func generateRandomPassword() string {
 }
 
 func (s *FileService) uploadFile(c *gin.Context) {
+	// Acquire upload semaphore
+	if err := s.uploadSem.Acquire(c.Request.Context(), 1); err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "Server busy, please try again later",
+		})
+		return
+	}
+	defer s.uploadSem.Release(1)
+
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "No file uploaded"})
@@ -272,6 +281,15 @@ func (s *FileService) uploadFile(c *gin.Context) {
 }
 
 func (s *FileService) getFile(c *gin.Context) {
+	// Acquire download semaphore
+	if err := s.downloadSem.Acquire(c.Request.Context(), 1); err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "Server busy, please try again later",
+		})
+		return
+	}
+	defer s.downloadSem.Release(1)
+
 	fileID := c.Param("id")
 	ctx := context.Background()
 
@@ -389,6 +407,15 @@ func (s *FileService) deleteFile(c *gin.Context) {
 }
 
 func (s *FileService) previewFile(c *gin.Context) {
+	// Acquire download semaphore for preview
+	if err := s.downloadSem.Acquire(c.Request.Context(), 1); err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "Server busy, please try again later",
+		})
+		return
+	}
+	defer s.downloadSem.Release(1)
+
 	fileID := c.Param("id")
 	ctx := context.Background()
 
@@ -524,6 +551,15 @@ func (s *FileService) previewFile(c *gin.Context) {
 
 // fastStreamFile provides optimized streaming for large media files
 func (s *FileService) fastStreamFile(c *gin.Context) {
+	// Acquire download semaphore for streaming
+	if err := s.downloadSem.Acquire(c.Request.Context(), 1); err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "Server busy, please try again later",
+		})
+		return
+	}
+	defer s.downloadSem.Release(1)
+
 	fileID := c.Param("id")
 	ctx := context.Background()
 

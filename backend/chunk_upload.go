@@ -195,6 +195,21 @@ func (m *ChunkUploadManager) InitiateUpload(c *gin.Context) {
 }
 
 func (m *ChunkUploadManager) UploadChunk(c *gin.Context) {
+	// Get file service from context for semaphore access
+	fileService, exists := c.Get("fileService")
+	if exists {
+		if fs, ok := fileService.(*FileService); ok {
+			// Acquire upload semaphore
+			if err := fs.uploadSem.Acquire(c.Request.Context(), 1); err != nil {
+				c.JSON(http.StatusServiceUnavailable, gin.H{
+					"error": "Server busy, please try again later",
+				})
+				return
+			}
+			defer fs.uploadSem.Release(1)
+		}
+	}
+
 	uploadID := c.Param("upload_id")
 	chunkIndexStr := c.Param("chunk_index")
 

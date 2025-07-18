@@ -126,8 +126,8 @@ func rateLimitMiddleware(_ *Config) gin.HandlerFunc {
 			return
 		}
 
-		// Rate limit: 100 requests per minute per IP
-		if client.requests >= 100 {
+		// Rate limit: 200 requests per minute per IP (increased for better concurrent support)
+		if client.requests >= 200 {
 			c.JSON(http.StatusTooManyRequests, gin.H{
 				"error": "Rate limit exceeded. Please try again later.",
 			})

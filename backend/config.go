@@ -36,6 +36,8 @@ type Config struct {
 	MaxConcurrentUploads int
 	RequestTimeout       time.Duration
 	RedisPoolSize        int
+	RedisMaxIdleConns    int
+	RedisIdleTimeout     time.Duration
 }
 
 func LoadConfig() *Config {
@@ -60,9 +62,11 @@ func LoadConfig() *Config {
 
 		CompressionLevel:     getEnvInt("COMPRESSION_LEVEL", 6),
 		EnableStreaming:      getEnvBool("ENABLE_STREAMING", true),
-		MaxConcurrentUploads: getEnvInt("MAX_CONCURRENT_UPLOADS", 10),
-		RequestTimeout:       getEnvDuration("REQUEST_TIMEOUT", "5m"), // Increased for large files
-		RedisPoolSize:        getEnvInt("REDIS_POOL_SIZE", 10),
+		MaxConcurrentUploads: getEnvInt("MAX_CONCURRENT_UPLOADS", 50),
+		RequestTimeout:       getEnvDuration("REQUEST_TIMEOUT", "2m"), // Reduced for better concurrency
+		RedisPoolSize:        getEnvInt("REDIS_POOL_SIZE", 100),       // Increased for high concurrency
+		RedisMaxIdleConns:    getEnvInt("REDIS_MAX_IDLE_CONNS", 20),
+		RedisIdleTimeout:     getEnvDuration("REDIS_IDLE_TIMEOUT", "5m"),
 	}
 }
 

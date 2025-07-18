@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
+	"golang.org/x/sync/semaphore"
 )
 
 type FileService struct {
@@ -19,6 +20,8 @@ type FileService struct {
 	compressor   *CompressionManager
 	config       *Config
 	chunkManager *ChunkUploadManager
+	uploadSem    *semaphore.Weighted
+	downloadSem  *semaphore.Weighted
 }
 
 func main() {
@@ -31,10 +34,12 @@ func main() {
 		Password:     config.RedisPassword,
 		DB:           config.RedisDB,
 		PoolSize:     config.RedisPoolSize,
-		MinIdleConns: 5,
+		MinIdleConns: config.RedisMaxIdleConns,
 		MaxRetries:   3,
-		ReadTimeout:  config.RequestTimeout,
-		WriteTimeout: config.RequestTimeout,
+		ReadTimeout:  30 * time.Second,  // Reduced for better concurrency
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  config.RedisIdleTimeout,
+		PoolTimeout:  5 * time.Second,   // Timeout when getting connection from pool
 	})
 
 	// Test Redis connection
@@ -52,6 +57,8 @@ func main() {
 		compressor:   compressor,
 		config:       config,
 		chunkManager: chunkManager,
+		uploadSem:    semaphore.NewWeighted(int64(config.MaxConcurrentUploads)),
+		downloadSem:  semaphore.NewWeighted(100), // 100 concurrent downloads
 	}
 
 	// Start expired file cleanup goroutine
@@ -136,6 +143,8 @@ func main() {
 		Handler:      router,
 		ReadTimeout:  config.RequestTimeout,
 		WriteTimeout: config.RequestTimeout,
+		IdleTimeout:  120 * time.Second,  // Close idle connections after 2 minutes
+		MaxHeaderBytes: 1 << 20,          // 1MB max header size
 	}
 
 	log.Fatal(server.ListenAndServe())
