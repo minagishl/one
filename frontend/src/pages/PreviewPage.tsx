@@ -138,25 +138,28 @@ const PreviewPage: React.FC = () => {
 								className='text-gray-600 hover:text-gray-900 inline-flex items-center gap-2 font-medium'
 							>
 								<ArrowLeft className='w-4 h-4' />
-								Back to Upload
+								<span className='hidden sm:inline'>Back to Upload</span>
 							</button>
-							<div className='h-6 w-px bg-gray-300'></div>
-							<h1 className='text-xl font-medium text-gray-900'>File Preview</h1>
+							<div className='h-6 w-px bg-gray-300 hidden sm:block'></div>
+							<h1 className='text-xl font-medium text-gray-900 hidden sm:block'>File Preview</h1>
+							<h1 className='text-lg font-medium text-gray-900 sm:hidden'>Preview</h1>
 						</div>
-						<div className='flex gap-3'>
+						<div className='flex gap-2 sm:gap-3'>
 							<button
 								onClick={handleDownload}
-								className='btn-primary inline-flex items-center gap-2'
+								className='btn-primary inline-flex items-center gap-2 px-4 py-2 sm:px-6 sm:py-3'
+								title='Download'
 							>
 								<Download className='w-4 h-4' />
-								Download
+								<span className='hidden sm:inline'>Download</span>
 							</button>
 							<button
 								onClick={handleDelete}
-								className='bg-red-500 text-white px-4 py-2 hover:bg-red-600 transition-colors inline-flex items-center gap-2'
+								className='bg-red-500 text-white px-4 py-2 sm:px-6 sm:py-3 hover:bg-red-600 transition-colors inline-flex items-center gap-2'
+								title='Delete'
 							>
 								<Trash2 className='w-4 h-4' />
-								Delete
+								<span className='hidden sm:inline'>Delete</span>
 							</button>
 						</div>
 					</div>
