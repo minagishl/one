@@ -16,11 +16,16 @@ type Config struct {
 	RedisPassword string
 	RedisDB       int
 
-
 	// File storage
 	MaxFileSize       int64
 	MaxFilesPerUser   int
 	AllowedExtensions []string
+
+	// Chunk upload settings
+	ChunkSize        int64
+	MaxChunksPerFile int
+	TempDir          string
+	ChunkTimeout     time.Duration
 
 	// Compression
 	CompressionLevel int
@@ -41,15 +46,20 @@ func LoadConfig() *Config {
 		RedisPassword: getEnv("REDIS_PASSWORD", ""),
 		RedisDB:       getEnvInt("REDIS_DB", 0),
 
-
-		MaxFileSize:       getEnvInt64("MAX_FILE_SIZE", 100*1024*1024), // 100MB
+		MaxFileSize:       getEnvInt64("MAX_FILE_SIZE", 10*1024*1024*1024), // 10GB
 		MaxFilesPerUser:   getEnvInt("MAX_FILES_PER_USER", 1000),
 		AllowedExtensions: []string{}, // Empty means all extensions allowed
+
+		// Chunk upload settings
+		ChunkSize:        getEnvInt64("CHUNK_SIZE", 100*1024*1024), // 100MB chunks (optimized for fewer requests)
+		MaxChunksPerFile: getEnvInt("MAX_CHUNKS_PER_FILE", 100),    // 100 chunks max (10GB total)
+		TempDir:          getEnv("TEMP_DIR", "./temp"),
+		ChunkTimeout:     getEnvDuration("CHUNK_TIMEOUT", "30m"), // Increased timeout for larger chunks
 
 		CompressionLevel:     getEnvInt("COMPRESSION_LEVEL", 6),
 		EnableStreaming:      getEnvBool("ENABLE_STREAMING", true),
 		MaxConcurrentUploads: getEnvInt("MAX_CONCURRENT_UPLOADS", 10),
-		RequestTimeout:       getEnvDuration("REQUEST_TIMEOUT", "30s"),
+		RequestTimeout:       getEnvDuration("REQUEST_TIMEOUT", "5m"), // Increased for large files
 		RedisPoolSize:        getEnvInt("REDIS_POOL_SIZE", 10),
 	}
 }

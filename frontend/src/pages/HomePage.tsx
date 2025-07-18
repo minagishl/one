@@ -25,7 +25,7 @@ const HomePage: React.FC = () => {
 					<div className='flex items-center justify-center gap-8 text-sm text-gray-500 mb-12'>
 						<div className='flex items-center gap-2'>
 							<div className='w-2 h-2 bg-primary-500'></div>
-							<span>100MB max size</span>
+							<span>10GB max size</span>
 						</div>
 						<div className='flex items-center gap-2'>
 							<div className='w-2 h-2 bg-primary-500'></div>

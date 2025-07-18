@@ -15,9 +15,10 @@ import (
 )
 
 type FileService struct {
-	redis      *redis.Client
-	compressor *CompressionManager
-	config     *Config
+	redis        *redis.Client
+	compressor   *CompressionManager
+	config       *Config
+	chunkManager *ChunkUploadManager
 }
 
 func main() {
@@ -44,11 +45,13 @@ func main() {
 
 	// Initialize services
 	compressor := NewCompressionManager()
+	chunkManager := NewChunkUploadManager(redisClient, config)
 
 	service := &FileService{
-		redis:      redisClient,
-		compressor: compressor,
-		config:     config,
+		redis:        redisClient,
+		compressor:   compressor,
+		config:       config,
+		chunkManager: chunkManager,
 	}
 
 	// Start expired file cleanup goroutine
@@ -69,6 +72,12 @@ func main() {
 	// Add request timeout middleware
 	router.Use(timeoutMiddleware(config.RequestTimeout))
 
+	// Middleware to make fileService available in handlers
+	router.Use(func(c *gin.Context) {
+		c.Set("fileService", service)
+		c.Next()
+	})
+
 	// API routes MUST come before static file routes
 	api := router.Group("/api")
 	{
@@ -80,6 +89,12 @@ func main() {
 		// ZIP file extraction endpoint with query parameter
 		api.GET("/zip/:id/extract", service.extractZipFile)
 		api.GET("/zip/:id", service.browseZip)
+
+		// Chunk upload endpoints
+		api.POST("/chunk/initiate", service.chunkManager.InitiateUpload)
+		api.POST("/chunk/:upload_id/:chunk_index", service.chunkManager.UploadChunk)
+		api.POST("/chunk/:upload_id/complete", service.chunkManager.CompleteUpload)
+		api.GET("/chunk/:upload_id/status", service.chunkManager.GetUploadStatus)
 	}
 
 	// Serve static files (React build) - AFTER API routes

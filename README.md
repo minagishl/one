@@ -6,7 +6,11 @@ ONE is a fast and ultra-lightweight file storage service that enables you to sec
 
 ## Features
 
+- **Large File Support**: Upload files up to 10GB using advanced chunked upload technology
 - **Advanced Multi-Algorithm Compression**: Automatic selection of optimal compression (Brotli, Zstandard, LZ4, Gzip) based on file type and size
+- **Real-time Progress Tracking**: Visual progress bars with detailed chunk upload information
+- **Error Recovery**: Automatic retry mechanism for failed chunk uploads with exponential backoff
+- **Memory Efficient**: Large files are processed in chunks and stored on disk to prevent memory exhaustion
 - **Browser-Based Preview**: View images, videos, audio, text files, PDFs, and more directly in your browser
 - **ZIP Archive Browsing**: Browse and extract files from ZIP archives with encoding support
 - **UUID-based File Management**: Secure file access with unique UUIDs
@@ -58,7 +62,11 @@ Edit the `compose.yml` file to configure the service:
 environment:
   - REDIS_ADDR=redis:6379 # Redis connection
   - PORT=8080 # Service port
-  - MAX_FILE_SIZE=104857600 # Maximum file size (100MB)
+  - MAX_FILE_SIZE=10737418240 # Maximum file size (10GB)
+  - CHUNK_SIZE=104857600 # Chunk size for large files (100MB - optimized for fewer requests)
+  - MAX_CHUNKS_PER_FILE=100 # Maximum chunks per file (100 chunks = 10GB)
+  - TEMP_DIR=./temp # Directory for temporary chunk storage
+  - CHUNK_TIMEOUT=30m # Timeout for chunk upload sessions (increased for larger chunks)
 ```
 
 ## Security Features
@@ -117,6 +125,42 @@ curl -X POST -F "file=@example.txt" -F "download_password=mypassword" http://loc
 ```
 
 Response includes file_id and delete_password for file management.
+
+### Large File Upload (Chunked)
+
+For files larger than 50MB, the system automatically uses chunked upload:
+
+1. **Initiate chunked upload:**
+
+```bash
+curl -X POST http://localhost:8080/api/chunk/initiate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "filename": "largefile.mp4",
+    "total_size": 1073741824,
+    "chunk_size": 10485760,
+    "download_password": "optional_password"
+  }'
+```
+
+2. **Upload chunks:**
+
+```bash
+curl -X POST http://localhost:8080/api/chunk/{upload_id}/0 \
+  -F "chunk=@chunk_0.bin"
+```
+
+3. **Complete upload:**
+
+```bash
+curl -X POST http://localhost:8080/api/chunk/{upload_id}/complete
+```
+
+4. **Check upload status:**
+
+```bash
+curl http://localhost:8080/api/chunk/{upload_id}/status
+```
 
 ### Get File Metadata
 

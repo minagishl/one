@@ -11,6 +11,7 @@ import (
 	"log"
 	"math/big"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -23,17 +24,17 @@ import (
 )
 
 type FileMetadata struct {
-	ID             string          `json:"id"`
-	Filename       string          `json:"filename"`
-	Size           int64           `json:"size"`
-	CompressedSize int64           `json:"compressed_size"`
-	MimeType       string          `json:"mime_type"`
-	Compression    CompressionType `json:"compression"`
-	UploadTime     time.Time       `json:"upload_time"`
-	ExpiresAt      time.Time       `json:"expires_at"`
-	DeletePassword string          `json:"delete_password,omitempty"`
-	DownloadPassword string        `json:"download_password,omitempty"`
-	HasDownloadPassword bool       `json:"has_download_password"`
+	ID                  string          `json:"id"`
+	Filename            string          `json:"filename"`
+	Size                int64           `json:"size"`
+	CompressedSize      int64           `json:"compressed_size"`
+	MimeType            string          `json:"mime_type"`
+	Compression         CompressionType `json:"compression"`
+	UploadTime          time.Time       `json:"upload_time"`
+	ExpiresAt           time.Time       `json:"expires_at"`
+	DeletePassword      string          `json:"delete_password,omitempty"`
+	DownloadPassword    string          `json:"download_password,omitempty"`
+	HasDownloadPassword bool            `json:"has_download_password"`
 }
 
 // convertToUTF8 tries to convert string from various Japanese encodings to UTF-8
@@ -42,10 +43,10 @@ func convertToUTF8(input string) string {
 	if utf8.ValidString(input) {
 		return input
 	}
-	
+
 	// Convert string to bytes for better encoding detection
 	inputBytes := []byte(input)
-	
+
 	// Try to convert from Shift_JIS (most common for Windows ZIP files)
 	decoder := japanese.ShiftJIS.NewDecoder()
 	if result, _, err := transform.Bytes(decoder, inputBytes); err == nil {
@@ -54,7 +55,7 @@ func convertToUTF8(input string) string {
 			return resultStr
 		}
 	}
-	
+
 	// Try to convert from EUC-JP
 	decoder = japanese.EUCJP.NewDecoder()
 	if result, _, err := transform.Bytes(decoder, inputBytes); err == nil {
@@ -63,7 +64,7 @@ func convertToUTF8(input string) string {
 			return resultStr
 		}
 	}
-	
+
 	// Try to convert from ISO-2022-JP
 	decoder = japanese.ISO2022JP.NewDecoder()
 	if result, _, err := transform.Bytes(decoder, inputBytes); err == nil {
@@ -72,7 +73,7 @@ func convertToUTF8(input string) string {
 			return resultStr
 		}
 	}
-	
+
 	// If all conversions fail, return the original string
 	return input
 }
@@ -82,8 +83,8 @@ func containsJapanese(s string) bool {
 	for _, r := range s {
 		// Check for Hiragana, Katakana, and Kanji ranges
 		if (r >= 0x3040 && r <= 0x309F) || // Hiragana
-		   (r >= 0x30A0 && r <= 0x30FF) || // Katakana
-		   (r >= 0x4E00 && r <= 0x9FAF) {  // Kanji
+			(r >= 0x30A0 && r <= 0x30FF) || // Katakana
+			(r >= 0x4E00 && r <= 0x9FAF) { // Kanji
 			return true
 		}
 	}
@@ -96,14 +97,14 @@ func detectAndConvertFilename(name string) string {
 	if utf8.ValidString(name) && isReadableText(name) {
 		return name
 	}
-	
+
 	// Convert the filename string back to raw bytes
 	// Go's ZIP reader reads filenames as latin-1, so we need to convert back to bytes
 	rawBytes := make([]byte, len(name))
 	for i, r := range []byte(name) {
 		rawBytes[i] = r
 	}
-	
+
 	// Try Shift_JIS conversion (most common for Japanese Windows ZIP files)
 	decoder := japanese.ShiftJIS.NewDecoder()
 	if converted, _, err := transform.Bytes(decoder, rawBytes); err == nil {
@@ -112,7 +113,7 @@ func detectAndConvertFilename(name string) string {
 			return result
 		}
 	}
-	
+
 	// Try EUC-JP conversion
 	decoder = japanese.EUCJP.NewDecoder()
 	if converted, _, err := transform.Bytes(decoder, rawBytes); err == nil {
@@ -121,7 +122,7 @@ func detectAndConvertFilename(name string) string {
 			return result
 		}
 	}
-	
+
 	// If conversion fails, try the original convertToUTF8 function
 	return convertToUTF8(name)
 }
@@ -131,19 +132,19 @@ func isReadableText(s string) bool {
 	if len(s) == 0 {
 		return true
 	}
-	
+
 	readableCount := 0
 	for _, r := range s {
 		// Count printable ASCII, Japanese characters, and common punctuation
 		if (r >= 32 && r <= 126) || // ASCII printable
-		   (r >= 0x3040 && r <= 0x309F) || // Hiragana
-		   (r >= 0x30A0 && r <= 0x30FF) || // Katakana
-		   (r >= 0x4E00 && r <= 0x9FAF) || // Kanji
-		   r == '/' || r == '\\' || r == '.' || r == '-' || r == '_' {
+			(r >= 0x3040 && r <= 0x309F) || // Hiragana
+			(r >= 0x30A0 && r <= 0x30FF) || // Katakana
+			(r >= 0x4E00 && r <= 0x9FAF) || // Kanji
+			r == '/' || r == '\\' || r == '.' || r == '-' || r == '_' {
 			readableCount++
 		}
 	}
-	
+
 	// If more than 70% of characters are readable, consider it valid
 	return float64(readableCount)/float64(len([]rune(s))) > 0.7
 }
@@ -152,7 +153,7 @@ func isReadableText(s string) bool {
 func generateRandomPassword() string {
 	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	const length = 12
-	
+
 	password := make([]byte, length)
 	for i := range password {
 		num, _ := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
@@ -200,21 +201,21 @@ func (s *FileService) uploadFile(c *gin.Context) {
 	// Create metadata with 24-hour expiration
 	now := time.Now()
 	expiresAt := now.Add(24 * time.Hour)
-	
+
 	detectedMimeType := GetMimeType(header.Filename)
 	log.Printf("uploadFile: filename=%s, detected MIME type=%s", header.Filename, detectedMimeType)
-	
+
 	metadata := FileMetadata{
-		ID:             fileID,
-		Filename:       header.Filename,
-		Size:           header.Size,
-		CompressedSize: int64(len(compressedContent)),
-		MimeType:       detectedMimeType,
-		Compression:    compressionType,
-		UploadTime:     now,
-		ExpiresAt:      expiresAt,
-		DeletePassword: deletePassword,
-		DownloadPassword: downloadPassword,
+		ID:                  fileID,
+		Filename:            header.Filename,
+		Size:                header.Size,
+		CompressedSize:      int64(len(compressedContent)),
+		MimeType:            detectedMimeType,
+		Compression:         compressionType,
+		UploadTime:          now,
+		ExpiresAt:           expiresAt,
+		DeletePassword:      deletePassword,
+		DownloadPassword:    downloadPassword,
 		HasDownloadPassword: hasDownloadPassword,
 	}
 
@@ -245,7 +246,7 @@ func (s *FileService) uploadFile(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to add to file list"})
 		return
 	}
-	
+
 	// Set expiration on the file list entry
 	s.redis.Expire(ctx, "files", expiration)
 
@@ -255,7 +256,6 @@ func (s *FileService) uploadFile(c *gin.Context) {
 		"metadata": metadata,
 	})
 }
-
 
 func (s *FileService) getFile(c *gin.Context) {
 	fileID := c.Param("id")
@@ -285,7 +285,7 @@ func (s *FileService) getFile(c *gin.Context) {
 		providedPassword := c.Query("password")
 		if providedPassword != metadata.DownloadPassword {
 			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "Password required",
+				"error":   "Password required",
 				"message": "This file is password protected. Please provide the correct password.",
 			})
 			return
@@ -299,11 +299,30 @@ func (s *FileService) getFile(c *gin.Context) {
 		return
 	}
 
-	// Decompress file
-	content, err := s.compressor.Decompress([]byte(compressedContent), metadata.Compression)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decompress file"})
-		return
+	var content []byte
+	// Check if file is stored on disk
+	if strings.HasPrefix(compressedContent, "DISK:") {
+		// Read from disk
+		diskPath := strings.TrimPrefix(compressedContent, "DISK:")
+		diskContent, err := os.ReadFile(diskPath)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read file from disk"})
+			return
+		}
+
+		// Decompress file
+		content, err = s.compressor.Decompress(diskContent, metadata.Compression)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decompress file"})
+			return
+		}
+	} else {
+		// Read from Redis
+		content, err = s.compressor.Decompress([]byte(compressedContent), metadata.Compression)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decompress file"})
+			return
+		}
 	}
 
 	// Set appropriate headers
@@ -335,7 +354,7 @@ func (s *FileService) deleteFile(c *gin.Context) {
 	providedPassword := c.Query("delete_password")
 	if providedPassword != metadata.DeletePassword {
 		c.JSON(http.StatusUnauthorized, gin.H{
-			"error": "Invalid delete password",
+			"error":   "Invalid delete password",
 			"message": "The provided delete password is incorrect.",
 		})
 		return
@@ -346,7 +365,7 @@ func (s *FileService) deleteFile(c *gin.Context) {
 	pipe.Del(ctx, "file:"+fileID)
 	pipe.Del(ctx, "content:"+fileID)
 	pipe.ZRem(ctx, "files", fileID)
-	
+
 	if _, err := pipe.Exec(ctx); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete file"})
 		return
@@ -383,7 +402,7 @@ func (s *FileService) previewFile(c *gin.Context) {
 		providedPassword := c.Query("password")
 		if providedPassword != metadata.DownloadPassword {
 			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "Password required",
+				"error":   "Password required",
 				"message": "This file is password protected. Please provide the correct password.",
 			})
 			return
@@ -395,9 +414,9 @@ func (s *FileService) previewFile(c *gin.Context) {
 	if !isPreviewable(metadata.MimeType) {
 		log.Printf("previewFile: file type %s not previewable", metadata.MimeType)
 		c.JSON(http.StatusUnsupportedMediaType, gin.H{
-			"error": "File type not previewable",
-			"message": "This file type cannot be previewed in the browser. Please download the file to view it.",
-			"mime_type": metadata.MimeType,
+			"error":            "File type not previewable",
+			"message":          "This file type cannot be previewed in the browser. Please download the file to view it.",
+			"mime_type":        metadata.MimeType,
 			"suggested_action": "download",
 		})
 		return
@@ -410,11 +429,30 @@ func (s *FileService) previewFile(c *gin.Context) {
 		return
 	}
 
-	// Decompress file
-	content, err := s.compressor.Decompress([]byte(compressedContent), metadata.Compression)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decompress file"})
-		return
+	var content []byte
+	// Check if file is stored on disk
+	if strings.HasPrefix(compressedContent, "DISK:") {
+		// Read from disk
+		diskPath := strings.TrimPrefix(compressedContent, "DISK:")
+		diskContent, err := os.ReadFile(diskPath)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read file from disk"})
+			return
+		}
+
+		// Decompress file
+		content, err = s.compressor.Decompress(diskContent, metadata.Compression)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decompress file"})
+			return
+		}
+	} else {
+		// Read from Redis
+		content, err = s.compressor.Decompress([]byte(compressedContent), metadata.Compression)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decompress file"})
+			return
+		}
 	}
 
 	// Set appropriate headers for preview
@@ -429,7 +467,7 @@ func isPreviewable(mimeType string) bool {
 		"image/", "text/", "application/json", "application/xml",
 		"video/", "audio/", "application/pdf",
 	}
-	
+
 	for _, prefix := range previewable {
 		if strings.HasPrefix(mimeType, prefix) {
 			return true
@@ -473,7 +511,7 @@ func (s *FileService) getMetadata(c *gin.Context) {
 		ExpiresAt:           metadata.ExpiresAt,
 		HasDownloadPassword: metadata.HasDownloadPassword,
 	}
-	
+
 	c.JSON(http.StatusOK, safeMetadata)
 }
 
@@ -513,11 +551,30 @@ func (s *FileService) browseZip(c *gin.Context) {
 		return
 	}
 
-	// Decompress file
-	content, err := s.compressor.Decompress([]byte(compressedContent), metadata.Compression)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decompress file"})
-		return
+	var content []byte
+	// Check if file is stored on disk
+	if strings.HasPrefix(compressedContent, "DISK:") {
+		// Read from disk
+		diskPath := strings.TrimPrefix(compressedContent, "DISK:")
+		diskContent, err := os.ReadFile(diskPath)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read file from disk"})
+			return
+		}
+
+		// Decompress file
+		content, err = s.compressor.Decompress(diskContent, metadata.Compression)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decompress file"})
+			return
+		}
+	} else {
+		// Read from Redis
+		content, err = s.compressor.Decompress([]byte(compressedContent), metadata.Compression)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decompress file"})
+			return
+		}
 	}
 
 	// Read ZIP contents
@@ -532,14 +589,14 @@ func (s *FileService) browseZip(c *gin.Context) {
 	for _, file := range zipReader.File {
 		// Try to detect and convert encoding of filename
 		fileName := detectAndConvertFilename(file.Name)
-		
+
 		fileInfo := map[string]interface{}{
-			"name":         fileName,
-			"size":         file.UncompressedSize64,
-			"compressed":   file.CompressedSize64,
-			"modified":     file.Modified,
-			"is_dir":       file.FileInfo().IsDir(),
-			"method":       file.Method,
+			"name":       fileName,
+			"size":       file.UncompressedSize64,
+			"compressed": file.CompressedSize64,
+			"modified":   file.Modified,
+			"is_dir":     file.FileInfo().IsDir(),
+			"method":     file.Method,
 		}
 		files = append(files, fileInfo)
 	}
@@ -555,14 +612,14 @@ func (s *FileService) extractZipFile(c *gin.Context) {
 	log.Printf("extractZipFile function called")
 	fileID := c.Param("id")
 	fileName := c.Query("filename")
-	
+
 	if fileName == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "filename parameter is required"})
 		return
 	}
-	
+
 	log.Printf("Extracting file '%s' from ZIP %s", fileName, fileID)
-	
+
 	ctx := context.Background()
 
 	// Get metadata
@@ -597,11 +654,30 @@ func (s *FileService) extractZipFile(c *gin.Context) {
 		return
 	}
 
-	// Decompress file
-	content, err := s.compressor.Decompress([]byte(compressedContent), metadata.Compression)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decompress file"})
-		return
+	var content []byte
+	// Check if file is stored on disk
+	if strings.HasPrefix(compressedContent, "DISK:") {
+		// Read from disk
+		diskPath := strings.TrimPrefix(compressedContent, "DISK:")
+		diskContent, err := os.ReadFile(diskPath)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read file from disk"})
+			return
+		}
+
+		// Decompress file
+		content, err = s.compressor.Decompress(diskContent, metadata.Compression)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decompress file"})
+			return
+		}
+	} else {
+		// Read from Redis
+		content, err = s.compressor.Decompress([]byte(compressedContent), metadata.Compression)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decompress file"})
+			return
+		}
 	}
 
 	// Read ZIP contents
@@ -630,8 +706,8 @@ func (s *FileService) extractZipFile(c *gin.Context) {
 			availableFiles = append(availableFiles, detectAndConvertFilename(file.Name))
 		}
 		c.JSON(http.StatusNotFound, gin.H{
-			"error": "File not found in ZIP archive",
-			"requested_file": fileName,
+			"error":           "File not found in ZIP archive",
+			"requested_file":  fileName,
 			"available_files": availableFiles,
 		})
 		return
@@ -670,12 +746,12 @@ func (s *FileService) extractZipFile(c *gin.Context) {
 	mimeType := GetMimeType(convertedName)
 	log.Printf("GetMimeType returned: %s", mimeType)
 	log.Printf("File: %s, Converted name: %s, MIME type: %s", targetFile.Name, convertedName, mimeType)
-	
+
 	// Check if file type is previewable
 	if !isPreviewable(mimeType) {
 		c.JSON(http.StatusUnsupportedMediaType, gin.H{
-			"error": "File type not previewable",
-			"message": "This file type cannot be previewed in the browser.",
+			"error":     "File type not previewable",
+			"message":   "This file type cannot be previewed in the browser.",
 			"mime_type": mimeType,
 		})
 		return
@@ -688,4 +764,3 @@ func (s *FileService) extractZipFile(c *gin.Context) {
 
 	c.Data(http.StatusOK, mimeType, fileContent)
 }
-
