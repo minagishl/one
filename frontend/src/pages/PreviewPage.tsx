@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { AlertTriangle, ArrowLeft, Download, Trash2 } from 'lucide-react';
 import FilePreview from '../components/FilePreview';
 import { FileMetadata } from '../types';
-import { downloadFile, deleteFile, getFileMetadata } from '../utils/api';
+import { downloadFile, deleteFile, getFileMetadata, getFilePreview } from '../utils/api';
 import { formatSize, formatDate, formatCountdown } from '../utils/format';
 
 const PreviewPage: React.FC = () => {
@@ -13,8 +13,10 @@ const PreviewPage: React.FC = () => {
 	const [error, setError] = useState<string>('');
 	const [countdown, setCountdown] = useState<string>('');
 	const [showPasswordDialog, setShowPasswordDialog] = useState(false);
-	const [passwordDialogType, setPasswordDialogType] = useState<'download' | 'delete'>('download');
+	const [passwordDialogType, setPasswordDialogType] = useState<'download' | 'delete' | 'preview'>('download');
 	const [passwordInput, setPasswordInput] = useState('');
+	const [previewPassword, setPreviewPassword] = useState<string>('');
+	const [isPreviewAuthenticated, setIsPreviewAuthenticated] = useState(false);
 
 	useEffect(() => {
 		if (fileId) {
@@ -38,6 +40,10 @@ const PreviewPage: React.FC = () => {
 			const metadata = await getFileMetadata(fileId);
 			setMetadata(metadata);
 			setError('');
+			
+			// Reset preview authentication when metadata changes
+			setIsPreviewAuthenticated(false);
+			setPreviewPassword('');
 		} catch (err) {
 			setError(err instanceof Error ? err.message : 'File not found or expired');
 		}
@@ -88,6 +94,34 @@ const PreviewPage: React.FC = () => {
 			}
 			setShowPasswordDialog(false);
 			setPasswordInput('');
+		} else if (passwordDialogType === 'preview') {
+			try {
+				// Test the password by making a preview request
+				await getFilePreview(metadata.id, passwordInput);
+				// If successful, store password and show preview
+				setPreviewPassword(passwordInput);
+				setIsPreviewAuthenticated(true);
+				setShowPasswordDialog(false);
+				setPasswordInput('');
+			} catch (error) {
+				// If password is wrong, show error
+				if (error instanceof Error && error.message.includes('Password required')) {
+					alert('Incorrect password. Please try again.');
+				} else {
+					alert('Failed to load preview.');
+				}
+			}
+		}
+	};
+
+	const handleShowPreview = () => {
+		if (!metadata) return;
+
+		if (metadata.has_download_password && !isPreviewAuthenticated) {
+			setPasswordDialogType('preview');
+			setShowPasswordDialog(true);
+		} else {
+			setIsPreviewAuthenticated(true);
 		}
 	};
 
@@ -208,7 +242,29 @@ const PreviewPage: React.FC = () => {
 				</div>
 
 				{/* File Preview */}
-				<FilePreview fileId={metadata.id} metadata={metadata} />
+				{metadata.has_download_password && !isPreviewAuthenticated ? (
+					<div className='card text-center py-12'>
+						<div className='w-16 h-16 bg-primary-100 mx-auto mb-6 flex items-center justify-center'>
+							<AlertTriangle className='w-8 h-8 text-primary-600' />
+						</div>
+						<h3 className='text-xl font-medium text-gray-900 mb-4'>This file is password protected</h3>
+						<p className='text-gray-600 mb-8 max-w-md mx-auto'>
+							A password is required to preview this file. Click the button below to enter the password.
+						</p>
+						<button
+							onClick={handleShowPreview}
+							className='btn-primary inline-flex items-center gap-2'
+						>
+							Show Preview
+						</button>
+					</div>
+				) : (
+					<FilePreview 
+						fileId={metadata.id} 
+						metadata={metadata} 
+						password={metadata.has_download_password ? previewPassword : undefined}
+					/>
+				)}
 			</main>
 
 			{/* Password Dialog */}
@@ -219,12 +275,16 @@ const PreviewPage: React.FC = () => {
 							<h3 className='text-xl font-medium text-gray-900 mb-4'>
 								{passwordDialogType === 'download'
 									? 'Download Password Required'
-									: 'Delete Password Required'}
+									: passwordDialogType === 'delete'
+									? 'Delete Password Required'
+									: 'Preview Password Required'}
 							</h3>
 							<p className='text-gray-600 mb-6'>
 								{passwordDialogType === 'download'
 									? 'This file is password protected. Enter the password to download it.'
-									: 'Enter the delete password to permanently remove this file.'}
+									: passwordDialogType === 'delete'
+									? 'Enter the delete password to permanently remove this file.'
+									: 'This file is password protected. Enter the password to preview it.'}
 							</p>
 							<input
 								type='password'
@@ -233,7 +293,9 @@ const PreviewPage: React.FC = () => {
 								placeholder={
 									passwordDialogType === 'download'
 										? 'Enter download password'
-										: 'Enter delete password'
+										: passwordDialogType === 'delete'
+										? 'Enter delete password'
+										: 'Enter password'
 								}
 								className='input-field w-full mb-6'
 								onKeyDown={(e) => e.key === 'Enter' && handlePasswordSubmit()}
@@ -253,7 +315,11 @@ const PreviewPage: React.FC = () => {
 									disabled={!passwordInput}
 									className='btn-primary flex-1 disabled:bg-gray-300 disabled:cursor-not-allowed'
 								>
-									{passwordDialogType === 'download' ? 'Download' : 'Delete'}
+									{passwordDialogType === 'download' 
+										? 'Download' 
+										: passwordDialogType === 'delete' 
+										? 'Delete' 
+										: 'Show Preview'}
 								</button>
 							</div>
 						</div>

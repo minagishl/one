@@ -12,9 +12,10 @@ import { formatSize, formatDate } from '../utils/format';
 interface FilePreviewProps {
 	fileId: string;
 	metadata: FileMetadata;
+	password?: string;
 }
 
-const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
+const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata, password }) => {
 	const [previewUrl, setPreviewUrl] = useState<string>('');
 	const [zipContents, setZipContents] = useState<ZipContents | null>(null);
 	const [activeTab, setActiveTab] = useState<'preview' | 'zip'>('preview');
@@ -43,7 +44,7 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 				URL.revokeObjectURL(zipFilePreview.previewUrl);
 			}
 		};
-	}, [fileId, metadata]);
+	}, [fileId, metadata, password]);
 
 	useEffect(() => {
 		const handleKeyDown = (event: KeyboardEvent) => {
@@ -89,27 +90,45 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 			const isMediaFile =
 				metadata.mime_type.startsWith('video/') || metadata.mime_type.startsWith('audio/');
 
-			// For large media files, skip blob loading and use direct streaming
+			// For large media files, handle password-protected files differently
 			if (isMediaFile && metadata.size > 5 * 1024 * 1024) {
-				// Don't load blob for media files, use direct streaming URL
-				setPreviewUrl(`/api/stream/${fileId}`);
+				if (metadata.has_download_password) {
+					// For password-protected media, use blob approach to ensure authentication
+					const { blob } = await getFilePreviewWithProgress(
+						fileId,
+						(progress) => {
+							setLoadingProgress(progress);
+						},
+						password
+					);
+					const url = URL.createObjectURL(blob);
+					setPreviewUrl(url);
+				} else {
+					// For non-protected media, use direct streaming URL
+					const streamUrl = password ? `/api/stream/${fileId}?password=${encodeURIComponent(password)}` : `/api/stream/${fileId}`;
+					setPreviewUrl(streamUrl);
+				}
 			} else if (isLargeFile) {
 				// For large non-media files, show progress and optimize loading
-				const { blob } = await getFilePreviewWithProgress(fileId, (progress) => {
-					setLoadingProgress(progress);
-				});
+				const { blob } = await getFilePreviewWithProgress(
+					fileId,
+					(progress) => {
+						setLoadingProgress(progress);
+					},
+					password
+				);
 				const url = URL.createObjectURL(blob);
 				setPreviewUrl(url);
 			} else {
 				// For smaller files, use normal loading
-				const { blob } = await getFilePreview(fileId);
+				const { blob } = await getFilePreview(fileId, password);
 				const url = URL.createObjectURL(blob);
 				setPreviewUrl(url);
 			}
 		} catch (err: any) {
 			console.error('Error loading preview:', err);
 			if (err.message && err.message.includes('Password required')) {
-				setError('This file is password protected. Use the download button to enter the password.');
+				setError('Password required. Please enter the password to view the preview.');
 			} else if (err.message && err.message.includes('415')) {
 				setError(
 					'This file type cannot be previewed in the browser. Please download the file to view it.'
@@ -269,7 +288,9 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 		if (mime_type.startsWith('video/')) {
 			// For large video files, use optimized streaming endpoint
 			const isLargeVideo = metadata.size > 5 * 1024 * 1024; // 5MB threshold
-			const streamUrl = isLargeVideo ? `/api/stream/${fileId}` : previewUrl;
+			const streamUrl = isLargeVideo 
+				? (password ? `/api/stream/${fileId}?password=${encodeURIComponent(password)}` : `/api/stream/${fileId}`)
+				: previewUrl;
 
 			return (
 				<video
@@ -287,7 +308,9 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 		if (mime_type.startsWith('audio/')) {
 			// For large audio files, use optimized streaming endpoint
 			const isLargeAudio = metadata.size > 5 * 1024 * 1024; // 5MB threshold
-			const streamUrl = isLargeAudio ? `/api/stream/${fileId}` : previewUrl;
+			const streamUrl = isLargeAudio 
+				? (password ? `/api/stream/${fileId}?password=${encodeURIComponent(password)}` : `/api/stream/${fileId}`)
+				: previewUrl;
 
 			return (
 				<div className='flex justify-center'>
