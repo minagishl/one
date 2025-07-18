@@ -175,12 +175,12 @@ func http2PushMiddleware() gin.HandlerFunc {
 			// Add HTTP/2 server push headers for better performance
 			c.Header("Link", "</static/assets/index.css>; rel=preload; as=style")
 			c.Header("Link", "</static/assets/index.js>; rel=preload; as=script")
-			
+
 			// Add performance hints
 			c.Header("X-DNS-Prefetch-Control", "on")
 			c.Header("X-Preload", "true")
 		}
-		
+
 		c.Next()
 	}
 }
@@ -192,7 +192,7 @@ func securityMiddleware() gin.HandlerFunc {
 		c.Header("X-Frame-Options", "DENY")
 		c.Header("X-XSS-Protection", "1; mode=block")
 		c.Header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
-		c.Header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; object-src 'none'")
+		c.Header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; object-src 'self' blob:; frame-src 'self' blob:")
 		c.Next()
 	}
 }

@@ -86,7 +86,8 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 
 			// Check if file is large (>50MB) and show special handling
 			const isLargeFile = metadata.size > 50 * 1024 * 1024;
-			const isMediaFile = metadata.mime_type.startsWith('video/') || metadata.mime_type.startsWith('audio/');
+			const isMediaFile =
+				metadata.mime_type.startsWith('video/') || metadata.mime_type.startsWith('audio/');
 
 			// For large media files, skip blob loading and use direct streaming
 			if (isMediaFile && metadata.size > 5 * 1024 * 1024) {
@@ -248,7 +249,7 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 
 		if (mime_type.startsWith('image/')) {
 			const isLargeImage = metadata.size > 1 * 1024 * 1024; // 1MB threshold
-			
+
 			return (
 				<img
 					src={previewUrl}
@@ -257,9 +258,9 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 					loading={isLargeImage ? 'lazy' : 'eager'}
 					onLoad={() => setIsLoading(false)}
 					onError={() => setError('Failed to load image')}
-					style={{ 
+					style={{
 						transition: 'opacity 0.3s ease',
-						opacity: isLoading ? 0.7 : 1 
+						opacity: isLoading ? 0.7 : 1,
 					}}
 				/>
 			);
@@ -269,14 +270,14 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 			// For large video files, use optimized streaming endpoint
 			const isLargeVideo = metadata.size > 5 * 1024 * 1024; // 5MB threshold
 			const streamUrl = isLargeVideo ? `/api/stream/${fileId}` : previewUrl;
-			
+
 			return (
-				<video 
-					controls 
-					className='max-w-full max-h-[80vh] mx-auto' 
+				<video
+					controls
+					className='max-w-full max-h-[80vh] mx-auto'
 					src={streamUrl}
 					preload={isLargeVideo ? 'metadata' : 'auto'}
-					crossOrigin="anonymous"
+					crossOrigin='anonymous'
 				>
 					Your browser does not support the video tag.
 				</video>
@@ -287,14 +288,14 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 			// For large audio files, use optimized streaming endpoint
 			const isLargeAudio = metadata.size > 5 * 1024 * 1024; // 5MB threshold
 			const streamUrl = isLargeAudio ? `/api/stream/${fileId}` : previewUrl;
-			
+
 			return (
 				<div className='flex justify-center'>
-					<audio 
-						controls 
+					<audio
+						controls
 						className='w-full max-w-lg'
 						preload={isLargeAudio ? 'metadata' : 'auto'}
-						crossOrigin="anonymous"
+						crossOrigin='anonymous'
 					>
 						<source src={streamUrl} type={mime_type} />
 						Your browser does not support the audio tag.
@@ -304,7 +305,14 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 		}
 
 		if (mime_type === 'application/pdf') {
-			return <iframe src={previewUrl} className='w-full h-96 border-0' title='PDF Preview' />;
+			return (
+				<embed
+					src={previewUrl}
+					className='w-full h-96 border-0'
+					title='PDF Preview'
+					type='application/pdf'
+				/>
+			);
 		}
 
 		if (
@@ -513,11 +521,11 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 		if (contentType.startsWith('video/')) {
 			// For large video files, show loading optimization
 			const isLargeVideo = zipFilePreview.file.size > 5 * 1024 * 1024;
-			
+
 			return (
-				<video 
-					controls 
-					className='max-w-full max-h-[60vh] mx-auto' 
+				<video
+					controls
+					className='max-w-full max-h-[60vh] mx-auto'
 					src={previewUrl}
 					preload={isLargeVideo ? 'metadata' : 'auto'}
 				>
@@ -529,14 +537,10 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata }) => {
 		if (contentType.startsWith('audio/')) {
 			// For large audio files, show loading optimization
 			const isLargeAudio = zipFilePreview.file.size > 5 * 1024 * 1024;
-			
+
 			return (
 				<div className='flex justify-center'>
-					<audio 
-						controls 
-						className='w-full max-w-lg'
-						preload={isLargeAudio ? 'metadata' : 'auto'}
-					>
+					<audio controls className='w-full max-w-lg' preload={isLargeAudio ? 'metadata' : 'auto'}>
 						<source src={previewUrl} type={contentType} />
 						Your browser does not support the audio tag.
 					</audio>
