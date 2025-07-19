@@ -41,8 +41,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags '-w -s' -o 
 # Final stage - minimal runtime image
 FROM alpine:latest
 
-# Install ca-certificates for HTTPS requests
-RUN apk --no-cache add ca-certificates tzdata
+# Install ca-certificates and su-exec for HTTPS requests and user switching
+RUN apk --no-cache add ca-certificates tzdata su-exec
 
 # Create non-root user
 RUN addgroup -g 1000 appuser && \
@@ -60,6 +60,10 @@ COPY --from=backend-builder /app/backend/schema.sql .
 # Copy built frontend from frontend builder
 COPY --from=frontend-builder /app/static ./static
 
+# Copy entrypoint script
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 # Create temp directory for file uploads in /app/temp (persistent) as root
 RUN mkdir -p /app/temp && \
     mkdir -p /app/temp/files && \
@@ -71,9 +75,6 @@ RUN chown -R appuser:appuser /app && \
     chmod 755 /app/temp && \
     chmod 755 /app/temp/files
 
-# Switch to non-root user
-USER appuser
-
 # Set environment variable for temp directory
 ENV TEMP_DIR=/app/temp
 
@@ -83,6 +84,9 @@ EXPOSE 8080
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:8080/ || exit 1
+
+# Set entrypoint
+ENTRYPOINT ["/entrypoint.sh"]
 
 # Run the application
 CMD ["./main"]

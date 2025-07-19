@@ -66,15 +66,63 @@ func NewChunkUploadManager(redis *redis.Client, config *Config) *ChunkUploadMana
 		config: config,
 	}
 
-	// Create temp directory if it doesn't exist
-	if err := os.MkdirAll(config.TempDir, 0755); err != nil {
-		panic(fmt.Sprintf("Failed to create temp directory: %v", err))
+	// Create temp directory if it doesn't exist and ensure proper permissions
+	if err := manager.ensureTempDirectory(); err != nil {
+		panic(fmt.Sprintf("Failed to setup temp directory: %v", err))
 	}
 
 	// Start cleanup routine
 	go manager.startCleanupRoutine()
 
 	return manager
+}
+
+// ensureTempDirectory creates and ensures proper permissions for temp directory
+func (m *ChunkUploadManager) ensureTempDirectory() error {
+	tempDir := m.config.TempDir
+	
+	// Create directory if it doesn't exist
+	if err := os.MkdirAll(tempDir, 0755); err != nil {
+		log.Printf("Failed to create temp directory %s: %v", tempDir, err)
+	}
+	
+	// Try to fix permissions
+	if err := os.Chmod(tempDir, 0755); err != nil {
+		log.Printf("Failed to set permissions on temp directory %s: %v", tempDir, err)
+	}
+	
+	// Test write permission
+	testFile := filepath.Join(tempDir, "test_write_permission")
+	if file, err := os.Create(testFile); err != nil {
+		// If we can't write, try to change ownership (this might fail in container)
+		log.Printf("Cannot write to temp directory %s, attempting to fix permissions: %v", tempDir, err)
+		
+		// Try to make directory writable
+		if err := os.Chmod(tempDir, 0777); err != nil {
+			return fmt.Errorf("failed to make temp directory writable: %v", err)
+		}
+		
+		// Test again
+		if file, err := os.Create(testFile); err != nil {
+			return fmt.Errorf("temp directory %s is not writable even after permission fix: %v", tempDir, err)
+		} else {
+			file.Close()
+			os.Remove(testFile)
+			log.Printf("Successfully fixed permissions for temp directory %s", tempDir)
+		}
+	} else {
+		file.Close()
+		os.Remove(testFile)
+		log.Printf("Temp directory %s is writable", tempDir)
+	}
+	
+	// Create files subdirectory
+	filesDir := filepath.Join(tempDir, "files")
+	if err := os.MkdirAll(filesDir, 0755); err != nil {
+		log.Printf("Failed to create files directory %s: %v", filesDir, err)
+	}
+	
+	return nil
 }
 
 func (m *ChunkUploadManager) startCleanupRoutine() {
