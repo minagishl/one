@@ -1638,6 +1638,10 @@ type UpdateExpirationRequest struct {
 	ExpiresAt     string `json:"expires_at"`
 }
 
+type AdminRequest struct {
+	AdminPassword string `json:"admin_password"`
+}
+
 func (s *FileService) updateFileExpiration(c *gin.Context) {
 	fileID := c.Param("id")
 	ctx := context.Background()
@@ -1725,5 +1729,165 @@ func (s *FileService) updateFileExpiration(c *gin.Context) {
 		"old_expires_at": oldExpiresAt,
 		"new_expires_at": expiresAt,
 		"metadata": metadata,
+	})
+}
+
+func (s *FileService) deleteFile(c *gin.Context) {
+	fileID := c.Param("id")
+	ctx := context.Background()
+
+	var req AdminRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
+		return
+	}
+
+	if s.config.AdminPassword == "" {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "Admin functionality not configured",
+			"message": "ADMIN_PASSWORD environment variable not set",
+		})
+		return
+	}
+
+	if req.AdminPassword != s.config.AdminPassword {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error": "Invalid admin password",
+			"message": "The provided admin password is incorrect",
+		})
+		return
+	}
+
+	// Check if file exists
+	metadataJSON, err := s.redis.Get(ctx, "file:"+fileID).Result()
+	if err == redis.Nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
+		return
+	} else if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve file metadata"})
+		return
+	}
+
+	var metadata FileMetadata
+	if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse file metadata"})
+		return
+	}
+
+	// Delete from Redis
+	pipe := s.redis.Pipeline()
+	pipe.Del(ctx, "file:"+fileID)
+	pipe.Del(ctx, "content:"+fileID)
+	pipe.ZRem(ctx, "files", fileID)
+
+	// Delete from disk if stored there (large files)
+	if metadata.StorageType == "disk" {
+		filesDir := filepath.Join(s.config.TempDir, "files")
+		storagePath := filepath.Join(filesDir, fileID)
+		if err := os.Remove(storagePath); err != nil && !os.IsNotExist(err) {
+			log.Printf("Failed to delete file from disk: %v", err)
+		}
+	}
+
+	if _, err := pipe.Exec(ctx); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete file"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "File deleted successfully",
+		"file_id": fileID,
+		"filename": metadata.OriginalName,
+	})
+}
+
+func (s *FileService) getAdminFileList(c *gin.Context) {
+	ctx := context.Background()
+
+	var req AdminRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
+		return
+	}
+
+	if s.config.AdminPassword == "" {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "Admin functionality not configured",
+			"message": "ADMIN_PASSWORD environment variable not set",
+		})
+		return
+	}
+
+	if req.AdminPassword != s.config.AdminPassword {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error": "Invalid admin password",
+			"message": "The provided admin password is incorrect",
+		})
+		return
+	}
+
+	// Get all files from sorted set
+	fileIDs, err := s.redis.ZRange(ctx, "files", 0, -1).Result()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve file list"})
+		return
+	}
+
+	files := make([]map[string]interface{}, 0, len(fileIDs))
+
+	for _, fileID := range fileIDs {
+		metadataJSON, err := s.redis.Get(ctx, "file:"+fileID).Result()
+		if err == redis.Nil {
+			// File might have expired, remove from sorted set
+			s.redis.ZRem(ctx, "files", fileID)
+			continue
+		} else if err != nil {
+			log.Printf("Failed to get metadata for file %s: %v", fileID, err)
+			continue
+		}
+
+		var metadata FileMetadata
+		if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
+			log.Printf("Failed to parse metadata for file %s: %v", fileID, err)
+			continue
+		}
+
+		// Get file size info
+		var fileSize int64
+		if metadata.StorageType == "disk" {
+			filesDir := filepath.Join(s.config.TempDir, "files")
+			storagePath := filepath.Join(filesDir, fileID)
+			if fileInfo, err := os.Stat(storagePath); err == nil {
+				fileSize = fileInfo.Size()
+			}
+		} else {
+			// For Redis-stored files, get from content
+			content, err := s.redis.Get(ctx, "content:"+fileID).Bytes()
+			if err == nil {
+				if metadata.Compressed {
+					fileSize = int64(len(content)) // Compressed size
+				} else {
+					fileSize = int64(len(content))
+				}
+			}
+		}
+
+		files = append(files, map[string]interface{}{
+			"file_id":       fileID,
+			"filename":      metadata.OriginalName,
+			"size":          fileSize,
+			"original_size": metadata.OriginalSize,
+			"uploaded_at":   metadata.UploadedAt,
+			"expires_at":    metadata.ExpiresAt,
+			"storage_type":  metadata.StorageType,
+			"compressed":    metadata.Compressed,
+			"has_password":  metadata.DownloadPassword != "",
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "File list retrieved successfully",
+		"count":   len(files),
+		"files":   files,
 	})
 }

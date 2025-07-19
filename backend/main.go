@@ -132,6 +132,8 @@ func main() {
 
 		// Admin endpoints
 		api.PUT("/admin/file/:id/expires", service.updateFileExpiration)
+		api.DELETE("/admin/file/:id", service.deleteFile)
+		api.GET("/admin/files", service.getAdminFileList)
 	}
 
 	// Serve static files (React build) - AFTER API routes

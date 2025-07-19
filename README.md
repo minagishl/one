@@ -277,6 +277,7 @@ environment:
 
 **API Usage:**
 
+### Update File Expiration
 ```bash
 curl -X PUT "http://localhost:8080/api/admin/file/{file_id}/expires" \
   -H "Content-Type: application/json" \
@@ -289,6 +290,30 @@ curl -X PUT "http://localhost:8080/api/admin/file/{file_id}/expires" \
 **Request Parameters:**
 - `admin_password`: Admin password (set via ADMIN_PASSWORD environment variable)
 - `expires_at`: New expiration time in RFC3339 format (must be in the future)
+
+### Delete File
+```bash
+curl -X DELETE "http://localhost:8080/api/admin/file/{file_id}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "admin_password": "your_secure_admin_password"
+  }'
+```
+
+**Request Parameters:**
+- `admin_password`: Admin password (set via ADMIN_PASSWORD environment variable)
+
+### Get File List
+```bash
+curl -X GET "http://localhost:8080/api/admin/files" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "admin_password": "your_secure_admin_password"
+  }'
+```
+
+**Request Parameters:**
+- `admin_password`: Admin password (set via ADMIN_PASSWORD environment variable)
 
 **Response:**
 ```json
