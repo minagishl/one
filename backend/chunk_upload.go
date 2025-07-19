@@ -244,9 +244,29 @@ func (m *ChunkUploadManager) InitiateUpload(c *gin.Context) {
 	// Create temp directory for chunks
 	tempDir := filepath.Join(m.config.TempDir, uploadID)
 	log.Printf("Creating temp directory: %s", tempDir)
+	log.Printf("Config TempDir: %s", m.config.TempDir)
+	
+	// Check if parent directory exists and is writable
+	parentDir := m.config.TempDir
+	if stat, err := os.Stat(parentDir); err != nil {
+		log.Printf("Parent directory %s does not exist or is not accessible: %v", parentDir, err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to create temp directory",
+			"details": fmt.Sprintf("Parent directory %s not accessible: %v", parentDir, err),
+		})
+		return
+	} else {
+		log.Printf("Parent directory %s exists, mode: %v", parentDir, stat.Mode())
+	}
+	
 	if err := os.MkdirAll(tempDir, 0755); err != nil {
 		log.Printf("Failed to create temp directory %s: %v", tempDir, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create temp directory"})
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to create temp directory",
+			"details": fmt.Sprintf("Cannot create directory %s: %v", tempDir, err),
+			"parent_dir": parentDir,
+			"temp_dir": tempDir,
+		})
 		return
 	}
 
