@@ -22,6 +22,8 @@ services:
       - file-storage-network
     volumes:
       - ./logs:/app/logs
+      - app_temp:/app/temp
+      - app_files:/app/temp/files
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
       interval: 30s
@@ -103,6 +105,10 @@ services:
 
 volumes:
   redis_data:
+    driver: local
+  app_temp:
+    driver: local
+  app_files:
     driver: local
 
 networks:
