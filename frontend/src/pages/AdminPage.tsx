@@ -23,8 +23,11 @@ interface FileData {
 	original_size: number;
 	uploaded_at: string;
 	expires_at: string;
-	storage_type: string;
+	storage_type: string; // "postgresql" or "disk"
+	storage_path?: string; // disk path if applicable
 	compressed: boolean;
+	compression?: string; // compression algorithm
+	mime_type?: string;
 	has_password: boolean;
 }
 
@@ -367,7 +370,7 @@ const AdminPage: React.FC = () => {
 											Expires
 										</th>
 										<th className='px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider'>
-											Storage
+											Storage Location
 										</th>
 										<th className='px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider'>
 											Actions
@@ -430,10 +433,18 @@ const AdminPage: React.FC = () => {
 													) : (
 														<Database className='w-4 h-4 text-green-600' />
 													)}
-													<span className='text-sm text-gray-700'>
-														{file.storage_type === 'disk' ? 'Disk' : 'Redis'}
-														{file.compressed && ' (Compressed)'}
-													</span>
+													<div className='flex flex-col'>
+														<span className='text-sm text-gray-700'>
+															{file.storage_type === 'disk' ? 'Disk' : 'PostgreSQL'}
+														</span>
+														{file.compressed && (
+															<span className='text-xs text-gray-500'>
+																{file.compression
+																	? `${file.compression.toUpperCase()} Compressed`
+																	: 'Compressed'}
+															</span>
+														)}
+													</div>
 												</div>
 											</td>
 											<td className='px-6 py-4'>

@@ -823,6 +823,7 @@ func (m *ChunkUploadManager) storeAssembledFileStreaming(fs *FileService, fileID
 			CompressionType:    "none",
 			StorageType:        "disk",
 			StoragePath:        &storagePath,
+			FileContent:        nil, // No content in database for disk files
 			UploadTime:         now,
 			ExpiresAt:          expiresAt,
 			DeletePassword:     deletePassword,
@@ -835,31 +836,13 @@ func (m *ChunkUploadManager) storeAssembledFileStreaming(fs *FileService, fileID
 		}
 
 		if err := fs.db.SaveFile(fileStorage); err != nil {
-			log.Printf("Failed to save large file metadata to database: %v", err)
-			// Continue with Redis storage for backward compatibility
+			return nil, fmt.Errorf("failed to save file metadata to database: %v", err)
 		}
 
-		// Store file path reference
-		if err := fs.redis.Set(ctx, "content:"+fileID, "DISK:"+storagePath, expiration).Err(); err != nil {
-			return nil, fmt.Errorf("failed to store file reference: %v", err)
-		}
-		
-		// Store metadata
+		// Cache metadata in Redis for faster access (optional)
 		metadataJSON, err := json.Marshal(metadata)
-		if err != nil {
-			return nil, err
-		}
-		
-		if err := fs.redis.Set(ctx, "file:"+fileID, metadataJSON, expiration).Err(); err != nil {
-			return nil, err
-		}
-		
-		// Add to file list
-		if err := fs.redis.ZAdd(ctx, "files", &redis.Z{
-			Score:  float64(expiresAt.Unix()),
-			Member: fileID,
-		}).Err(); err != nil {
-			return nil, err
+		if err == nil {
+			fs.redis.Set(ctx, "file:"+fileID, metadataJSON, expiration)
 		}
 		
 		return map[string]interface{}{
@@ -925,8 +908,14 @@ func (m *ChunkUploadManager) storeAssembledFile(fs *FileService, fileID, filenam
 		HasDownloadPassword: downloadPassword != "",
 	}
 
-	// For very large files, store on disk instead of Redis
-	if len(compressedContent) > 50*1024*1024 { // 50MB threshold for disk storage
+	// Determine storage strategy based on file size
+	var storageType string
+	var storagePath *string
+	var fileContent []byte
+	
+	// For very large files (>1GB), store on disk; otherwise store in PostgreSQL
+	if len(compressedContent) > 1024*1024*1024 { // 1GB threshold
+		storageType = "disk"
 		// Store file on disk
 		diskPath := filepath.Join(m.config.TempDir, "files", fileID)
 		if err := os.MkdirAll(filepath.Dir(diskPath), 0755); err != nil {
@@ -937,42 +926,51 @@ func (m *ChunkUploadManager) storeAssembledFile(fs *FileService, fileID, filenam
 			return nil, fmt.Errorf("failed to write file to disk: %v", err)
 		}
 
-		// Store file path reference in Redis instead of content
-		expiration := 24 * time.Hour
-		if err := fs.redis.Set(ctx, "content:"+fileID, "DISK:"+diskPath, expiration).Err(); err != nil {
-			return nil, fmt.Errorf("failed to store file reference: %v", err)
-		}
-
+		storagePath = &diskPath
+		fileContent = nil // Don't store content in database for disk files
 		fmt.Printf("Stored large file on disk: %s\n", diskPath)
 	} else {
-		// Store smaller files in Redis as before
-		expiration := 24 * time.Hour
-		if err := fs.redis.Set(ctx, "content:"+fileID, compressedContent, expiration).Err(); err != nil {
-			return nil, fmt.Errorf("failed to store file content: %v", err)
+		storageType = "postgresql"
+		storagePath = nil
+		fileContent = compressedContent
+	}
+
+	// Store file metadata and content in PostgreSQL
+	fileStorage := &FileStorage{
+		ID:                  fileID,
+		Filename:           filename,
+		OriginalSize:       metadata.Size,
+		CompressedSize:     &metadata.CompressedSize,
+		MimeType:           detectedMimeType,
+		CompressionType:    string(compressionType),
+		StorageType:        storageType,
+		StoragePath:        storagePath,
+		FileContent:        fileContent,
+		UploadTime:         now,
+		ExpiresAt:          expiresAt,
+		DeletePassword:     deletePassword,
+		DownloadPassword:   nil,
+		HasDownloadPassword: downloadPassword != "",
+	}
+
+	if downloadPassword != "" {
+		fileStorage.DownloadPassword = &downloadPassword
+	}
+
+	if err := fs.db.SaveFile(fileStorage); err != nil {
+		// If database save fails, clean up disk file if it was created
+		if storageType == "disk" && storagePath != nil {
+			os.Remove(*storagePath)
 		}
+		return nil, fmt.Errorf("failed to save file: %v", err)
 	}
 
-	// Store metadata with 24-hour expiration
+	// Cache metadata in Redis for faster access (optional)
 	metadataJSON, err := json.Marshal(metadata)
-	if err != nil {
-		return nil, err
+	if err == nil {
+		expiration := 24 * time.Hour
+		fs.redis.Set(ctx, "file:"+fileID, metadataJSON, expiration)
 	}
-
-	expiration := 24 * time.Hour
-	if err := fs.redis.Set(ctx, "file:"+fileID, metadataJSON, expiration).Err(); err != nil {
-		return nil, err
-	}
-
-	// Add to file list with expiration score
-	if err := fs.redis.ZAdd(ctx, "files", &redis.Z{
-		Score:  float64(expiresAt.Unix()),
-		Member: fileID,
-	}).Err(); err != nil {
-		return nil, err
-	}
-
-	// Set expiration on the file list entry
-	fs.redis.Expire(ctx, "files", expiration)
 
 	return map[string]interface{}{
 		"message":  "File uploaded successfully",

@@ -68,6 +68,19 @@ func main() {
 		}
 	} else {
 		log.Printf("Database schema already exists")
+		
+		// Check if VARCHAR length migration is needed
+		migrationNeeded, err := database.CheckVarcharLengthMigrationNeeded()
+		if err != nil {
+			log.Fatal("Failed to check VARCHAR length migration status:", err)
+		}
+		
+		if migrationNeeded {
+			log.Printf("VARCHAR length migration needed, applying fix...")
+			if err := database.RunVarcharLengthMigration(); err != nil {
+				log.Fatal("Failed to run VARCHAR length migration:", err)
+			}
+		}
 	}
 
 	// Initialize services
@@ -207,31 +220,34 @@ func (s *FileService) startDatabaseCleanup() {
 }
 
 func (s *FileService) cleanupExpiredFiles() {
+	log.Printf("Starting cleanup of expired files...")
+
+	// Clean up expired files from PostgreSQL
+	if err := s.db.CleanupExpiredData(); err != nil {
+		log.Printf("Error cleaning up expired files from database: %v", err)
+		return
+	}
+
+	// Optional: Clean up any remaining Redis cache entries
 	ctx := context.Background()
 	now := time.Now()
 
-	// Get all files that have expired
+	// Get all files that have expired from Redis cache
 	expiredFiles, err := s.redis.ZRangeByScore(ctx, "files", &redis.ZRangeBy{
 		Min: "0",
 		Max: fmt.Sprintf("%d", now.Unix()),
 	}).Result()
 
-	if err != nil {
-		log.Printf("Error getting expired files: %v", err)
-		return
-	}
-
-	for _, fileID := range expiredFiles {
-		// Remove file content and metadata
+	if err == nil && len(expiredFiles) > 0 {
+		// Remove expired entries from Redis cache
 		pipe := s.redis.Pipeline()
-		pipe.Del(ctx, "file:"+fileID)
-		pipe.Del(ctx, "content:"+fileID)
-		pipe.ZRem(ctx, "files", fileID)
-
-		if _, err := pipe.Exec(ctx); err != nil {
-			log.Printf("Error deleting expired file %s: %v", fileID, err)
-		} else {
-			log.Printf("Deleted expired file: %s", fileID)
+		for _, fileID := range expiredFiles {
+			pipe.Del(ctx, "file:"+fileID)
+			pipe.ZRem(ctx, "files", fileID)
 		}
+		pipe.Exec(ctx)
+		log.Printf("Cleaned up %d expired file entries from Redis cache", len(expiredFiles))
 	}
+
+	log.Printf("Cleanup of expired files completed")
 }

@@ -127,6 +127,71 @@ func (db *Database) RunMigrations() error {
 	return nil
 }
 
+// RunVarcharLengthMigration applies the VARCHAR length fix migration
+func (db *Database) RunVarcharLengthMigration() error {
+	log.Printf("Running VARCHAR length fix migration...")
+
+	// Read migration file
+	migrationPath := filepath.Join("/app", "migration_fix_varchar_length.sql")
+	migrationSQL, err := ioutil.ReadFile(migrationPath)
+	if err != nil {
+		return fmt.Errorf("failed to read migration file: %v", err)
+	}
+
+	// Execute migration
+	ctx := context.Background()
+	conn, err := db.Pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to acquire database connection: %v", err)
+	}
+	defer conn.Release()
+
+	// Start transaction
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to start transaction: %v", err)
+	}
+	defer tx.Rollback(ctx)
+
+	// Execute migration SQL
+	if _, err := tx.Exec(ctx, string(migrationSQL)); err != nil {
+		return fmt.Errorf("failed to execute migration: %v", err)
+	}
+
+	// Commit transaction
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit migration transaction: %v", err)
+	}
+
+	log.Printf("VARCHAR length fix migration completed successfully")
+	return nil
+}
+
+// CheckVarcharLengthMigrationNeeded checks if the VARCHAR length migration is needed
+func (db *Database) CheckVarcharLengthMigrationNeeded() (bool, error) {
+	ctx := context.Background()
+	
+	query := `
+		SELECT character_maximum_length 
+		FROM information_schema.columns 
+		WHERE table_schema = 'public' 
+		AND table_name = 'files' 
+		AND column_name = 'id'
+	`
+	
+	var maxLength *int
+	err := db.Pool.QueryRow(ctx, query).Scan(&maxLength)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return false, nil // Table doesn't exist, no migration needed
+		}
+		return false, fmt.Errorf("failed to check column length: %v", err)
+	}
+	
+	// If maxLength is 20, migration is needed
+	return maxLength != nil && *maxLength == 20, nil
+}
+
 // CheckSchemaExists checks if the database schema is already initialized
 func (db *Database) CheckSchemaExists() (bool, error) {
 	ctx := context.Background()
@@ -166,7 +231,7 @@ func (db *Database) CleanupExpiredData() error {
 	return nil
 }
 
-// FileStorage represents file metadata in the database
+// FileStorage represents file metadata and content in the database
 type FileStorage struct {
 	ID              string    `db:"id"`
 	Filename        string    `db:"filename"`
@@ -176,6 +241,7 @@ type FileStorage struct {
 	CompressionType string    `db:"compression_type"`
 	StorageType     string    `db:"storage_type"`
 	StoragePath     *string   `db:"storage_path"`
+	FileContent     []byte    `db:"file_content"`
 	UploadTime      time.Time `db:"upload_time"`
 	ExpiresAt       time.Time `db:"expires_at"`
 	DeletePassword  string    `db:"delete_password"`
@@ -185,36 +251,67 @@ type FileStorage struct {
 	UpdatedAt       time.Time `db:"updated_at"`
 }
 
-// SaveFile saves file metadata to the database
+// SaveFile saves file metadata and content to the database
 func (db *Database) SaveFile(file *FileStorage) error {
 	ctx := context.Background()
 	
 	query := `
 		INSERT INTO files (
 			id, filename, original_size, compressed_size, mime_type, compression_type,
-			storage_type, storage_path, upload_time, expires_at, delete_password,
+			storage_type, storage_path, file_content, upload_time, expires_at, delete_password,
 			download_password, has_download_password
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
 		)
 	`
 	
 	_, err := db.Pool.Exec(ctx, query,
 		file.ID, file.Filename, file.OriginalSize, file.CompressedSize,
 		file.MimeType, file.CompressionType, file.StorageType, file.StoragePath,
-		file.UploadTime, file.ExpiresAt, file.DeletePassword,
+		file.FileContent, file.UploadTime, file.ExpiresAt, file.DeletePassword,
 		file.DownloadPassword, file.HasDownloadPassword,
 	)
 	
 	if err != nil {
-		return fmt.Errorf("failed to save file metadata: %v", err)
+		return fmt.Errorf("failed to save file metadata and content: %v", err)
 	}
 	
 	return nil
 }
 
-// GetFile retrieves file metadata from the database
+// GetFile retrieves file metadata and content from the database
 func (db *Database) GetFile(fileID string) (*FileStorage, error) {
+	ctx := context.Background()
+	
+	query := `
+		SELECT id, filename, original_size, compressed_size, mime_type, compression_type,
+			   storage_type, storage_path, file_content, upload_time, expires_at, delete_password,
+			   download_password, has_download_password, created_at, updated_at
+		FROM files
+		WHERE id = $1 AND expires_at > NOW()
+	`
+	
+	var file FileStorage
+	err := db.Pool.QueryRow(ctx, query, fileID).Scan(
+		&file.ID, &file.Filename, &file.OriginalSize, &file.CompressedSize,
+		&file.MimeType, &file.CompressionType, &file.StorageType, &file.StoragePath,
+		&file.FileContent, &file.UploadTime, &file.ExpiresAt, &file.DeletePassword,
+		&file.DownloadPassword, &file.HasDownloadPassword,
+		&file.CreatedAt, &file.UpdatedAt,
+	)
+	
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil // File not found or expired
+		}
+		return nil, fmt.Errorf("failed to get file metadata and content: %v", err)
+	}
+	
+	return &file, nil
+}
+
+// GetFileMetadata retrieves only file metadata (without content) from the database
+func (db *Database) GetFileMetadata(fileID string) (*FileStorage, error) {
 	ctx := context.Background()
 	
 	query := `
@@ -242,6 +339,29 @@ func (db *Database) GetFile(fileID string) (*FileStorage, error) {
 	}
 	
 	return &file, nil
+}
+
+// GetFileContent retrieves only file content from the database
+func (db *Database) GetFileContent(fileID string) ([]byte, error) {
+	ctx := context.Background()
+	
+	query := `
+		SELECT file_content
+		FROM files
+		WHERE id = $1 AND expires_at > NOW()
+	`
+	
+	var content []byte
+	err := db.Pool.QueryRow(ctx, query, fileID).Scan(&content)
+	
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, fmt.Errorf("file not found or expired")
+		}
+		return nil, fmt.Errorf("failed to get file content: %v", err)
+	}
+	
+	return content, nil
 }
 
 // DeleteFile removes file metadata from the database
