@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { AlertTriangle, ArrowLeft, Download, Trash2 } from 'lucide-react';
 import FilePreview from '../components/FilePreview';
+import Button from '../components/Button';
+import Input from '../components/Input';
 import { FileMetadata } from '../types';
 import { downloadFile, deleteFile, getFilePreview, getFileStatus } from '../utils/api';
 import { formatSize, formatDate, formatCountdown } from '../utils/format';
@@ -35,7 +37,7 @@ const PreviewPage: React.FC = () => {
 			setIsAdminMode(true);
 			setIsPreviewAuthenticated(true); // Skip password prompt for admin
 		}
-		
+
 		if (fileId) {
 			loadFileMetadata();
 		}
@@ -152,7 +154,12 @@ const PreviewPage: React.FC = () => {
 			setShowPasswordDialog(true);
 		} else {
 			try {
-				await downloadFile(metadata.id, metadata.filename, undefined, isAdminMode ? adminToken : undefined);
+				await downloadFile(
+					metadata.id,
+					metadata.filename,
+					undefined,
+					isAdminMode ? adminToken : undefined
+				);
 			} catch (error) {
 				alert('Download failed: ' + (error instanceof Error ? error.message : 'Unknown error'));
 			}
@@ -189,14 +196,23 @@ const PreviewPage: React.FC = () => {
 
 		if (passwordDialogType === 'download') {
 			try {
-				await downloadFile(metadata.id, metadata.filename, passwordInput, isAdminMode ? adminToken : undefined);
+				await downloadFile(
+					metadata.id,
+					metadata.filename,
+					passwordInput,
+					isAdminMode ? adminToken : undefined
+				);
 				setShowPasswordDialog(false);
 				setPasswordInput('');
 			} catch (error) {
 				alert('Download failed: ' + (error instanceof Error ? error.message : 'Unknown error'));
 			}
 		} else if (passwordDialogType === 'delete') {
-			const result = await deleteFile(metadata.id, passwordInput, isAdminMode ? adminToken : undefined);
+			const result = await deleteFile(
+				metadata.id,
+				passwordInput,
+				isAdminMode ? adminToken : undefined
+			);
 			if (result.success) {
 				alert('File deleted successfully');
 				navigate('/');
@@ -245,13 +261,9 @@ const PreviewPage: React.FC = () => {
 					</div>
 					<h1 className='text-2xl font-medium text-gray-900 mb-4'>File Not Found</h1>
 					<p className='text-gray-600 mb-8'>{error}</p>
-					<button
-						onClick={() => navigate('/')}
-						className='btn-primary inline-flex items-center gap-2'
-					>
-						<ArrowLeft className='w-4 h-4' />
+					<Button onClick={() => navigate('/')} variant='primary' size='md' icon={ArrowLeft}>
 						Go Back
-					</button>
+					</Button>
 				</div>
 			</div>
 		);
@@ -264,13 +276,9 @@ const PreviewPage: React.FC = () => {
 					<div className='animate-spin w-8 h-8 border-2 border-gray-200 border-t-primary-500 rounded-full mx-auto mb-4'></div>
 					<h2 className='text-xl font-medium text-gray-900 mb-2'>Processing File</h2>
 					<p className='text-gray-600 mb-6'>{processingMessage}</p>
-					<button
-						onClick={() => navigate('/')}
-						className='btn-primary inline-flex items-center gap-2'
-					>
-						<ArrowLeft className='w-4 h-4' />
+					<Button onClick={() => navigate('/')} variant='primary' size='md' icon={ArrowLeft}>
 						Go Back
-					</button>
+					</Button>
 				</div>
 			</div>
 		);
@@ -297,34 +305,38 @@ const PreviewPage: React.FC = () => {
 				<div className='max-w-6xl mx-auto px-6 py-4'>
 					<div className='flex items-center justify-between'>
 						<div className='flex items-center gap-4'>
-							<button
+							<Button
 								onClick={() => navigate('/')}
-								className='text-gray-600 hover:text-gray-900 inline-flex items-center gap-2 font-medium'
+								variant='secondary'
+								size='md'
+								icon={ArrowLeft}
+								className='text-gray-600 hover:text-gray-900 border-none bg-transparent'
 							>
-								<ArrowLeft className='w-4 h-4' />
 								<span className='hidden sm:inline'>Back to Upload</span>
-							</button>
+							</Button>
 							<div className='h-6 w-px bg-gray-300 hidden sm:block'></div>
 							<h1 className='text-xl font-medium text-gray-900 hidden sm:block'>File Preview</h1>
 							<h1 className='text-lg font-medium text-gray-900 sm:hidden'>Preview</h1>
 						</div>
 						<div className='flex gap-2 sm:gap-3'>
-							<button
+							<Button
 								onClick={handleDownload}
-								className='btn-primary inline-flex items-center gap-2 px-4 py-2 sm:px-6 sm:py-3'
-								title='Download'
+								variant='primary'
+								size='md'
+								icon={Download}
+								className='px-4 py-2 sm:px-6 sm:py-3'
 							>
-								<Download className='w-4 h-4' />
 								<span className='hidden sm:inline'>Download</span>
-							</button>
-							<button
+							</Button>
+							<Button
 								onClick={handleDelete}
-								className='bg-red-500 text-white px-4 py-2 sm:px-6 sm:py-3 hover:bg-red-600 transition-colors inline-flex items-center gap-2'
-								title='Delete'
+								variant='danger'
+								size='md'
+								icon={Trash2}
+								className='px-4 py-2 sm:px-6 sm:py-3'
 							>
-								<Trash2 className='w-4 h-4' />
 								<span className='hidden sm:inline'>Delete</span>
-							</button>
+							</Button>
 						</div>
 					</div>
 				</div>
@@ -384,12 +396,9 @@ const PreviewPage: React.FC = () => {
 							A password is required to preview this file. Click the button below to enter the
 							password.
 						</p>
-						<button
-							onClick={handleShowPreview}
-							className='btn-primary inline-flex items-center gap-2'
-						>
+						<Button onClick={handleShowPreview} variant='primary' size='md'>
 							Show Preview
-						</button>
+						</Button>
 					</div>
 				) : (
 					<FilePreview
@@ -420,7 +429,7 @@ const PreviewPage: React.FC = () => {
 									? 'Enter the delete password to permanently remove this file.'
 									: 'This file is password protected. Enter the password to preview it.'}
 							</p>
-							<input
+							<Input
 								type='password'
 								value={passwordInput}
 								onChange={(e) => setPasswordInput(e.target.value)}
@@ -431,30 +440,35 @@ const PreviewPage: React.FC = () => {
 										? 'Enter delete password'
 										: 'Enter password'
 								}
-								className='input-field w-full mb-6'
+								inputSize='md'
+								containerClassName='mb-6'
 								onKeyDown={(e) => e.key === 'Enter' && handlePasswordSubmit()}
 							/>
 							<div className='flex gap-3'>
-								<button
+								<Button
 									onClick={() => {
 										setShowPasswordDialog(false);
 										setPasswordInput('');
 									}}
-									className='btn-secondary flex-1'
+									variant='secondary'
+									size='md'
+									className='flex-1'
 								>
 									Cancel
-								</button>
-								<button
+								</Button>
+								<Button
 									onClick={handlePasswordSubmit}
 									disabled={!passwordInput}
-									className='btn-primary flex-1 disabled:bg-gray-300 disabled:cursor-not-allowed'
+									variant='primary'
+									size='md'
+									className='flex-1'
 								>
 									{passwordDialogType === 'download'
 										? 'Download'
 										: passwordDialogType === 'delete'
 										? 'Delete'
 										: 'Show Preview'}
-								</button>
+								</Button>
 							</div>
 						</div>
 					</div>

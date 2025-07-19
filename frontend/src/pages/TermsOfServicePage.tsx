@@ -2,6 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Shield, TriangleAlert } from 'lucide-react';
 import Footer from '../components/Footer';
+import Button from '../components/Button';
 
 const TermsOfServicePage: React.FC = () => {
 	const navigate = useNavigate();
@@ -12,13 +13,15 @@ const TermsOfServicePage: React.FC = () => {
 			<header className='bg-white border-b border-gray-200'>
 				<div className='max-w-6xl mx-auto px-6 py-4'>
 					<div className='flex items-center gap-4'>
-						<button
+						<Button
 							onClick={() => navigate('/')}
-							className='text-gray-600 hover:text-gray-900 inline-flex items-center gap-2 font-medium'
+							variant='secondary'
+							size='md'
+							icon={ArrowLeft}
+							className='text-gray-600 hover:text-gray-900 border-none bg-transparent'
 						>
-							<ArrowLeft className='w-4 h-4' />
 							Back to Home
-						</button>
+						</Button>
 						<div className='h-6 w-px bg-gray-300'></div>
 						<h1 className='text-xl font-medium text-gray-900'>Terms of Service</h1>
 					</div>

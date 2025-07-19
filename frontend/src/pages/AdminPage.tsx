@@ -13,6 +13,8 @@ import {
 	Lock,
 } from 'lucide-react';
 import Footer from '../components/Footer';
+import Button from '../components/Button';
+import Input from '../components/Input';
 
 interface FileData {
 	file_id: string;
@@ -248,24 +250,15 @@ const AdminPage: React.FC = () => {
 					<div className='max-w-md mx-auto'>
 						<div className='bg-white border border-gray-200 p-8'>
 							<form className='space-y-6' onSubmit={authenticate}>
-								<div>
-									<label
-										htmlFor='password'
-										className='block text-sm font-medium text-gray-900 mb-2'
-									>
-										Admin Password
-									</label>
-									<input
-										id='password'
-										name='password'
-										type='password'
-										required
-										value={password}
-										onChange={(e) => setPassword(e.target.value)}
-										className='w-full px-3 py-2 border border-gray-300 text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-primary-500'
-										placeholder='Enter admin password'
-									/>
-								</div>
+								<Input
+									label='Admin Password'
+									type='password'
+									value={password}
+									onChange={(e) => setPassword(e.target.value)}
+									placeholder='Enter admin password'
+									required
+									inputSize='md'
+								/>
 
 								{error && (
 									<div className='text-red-600 text-sm bg-red-50 p-3 border border-red-200'>
@@ -273,13 +266,16 @@ const AdminPage: React.FC = () => {
 									</div>
 								)}
 
-								<button
+								<Button
 									type='submit'
 									disabled={loading}
-									className='w-full py-3 px-4 bg-primary-500 hover:bg-primary-600 text-white font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+									variant='primary'
+									size='md'
+									className='w-full'
+									loading={loading}
 								>
 									{loading ? 'Authenticating...' : 'Access Admin Panel'}
-								</button>
+								</Button>
 							</form>
 						</div>
 					</div>
@@ -307,21 +303,25 @@ const AdminPage: React.FC = () => {
 					</p>
 
 					<div className='flex items-center justify-center gap-4'>
-						<button
+						<Button
 							onClick={refreshFileList}
 							disabled={loading}
-							className='flex items-center gap-2 px-6 py-2 bg-primary-500 hover:bg-primary-600 text-white font-medium transition-colors disabled:opacity-50'
+							variant='primary'
+							size='md'
+							icon={RefreshCw}
+							loading={loading}
 						>
-							<RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
 							Refresh
-						</button>
-						<button
+						</Button>
+						<Button
 							onClick={logout}
-							className='flex items-center gap-2 px-6 py-2 bg-gray-600 hover:bg-gray-700 text-white font-medium transition-colors'
+							variant='secondary'
+							size='md'
+							icon={LogOut}
+							className='bg-gray-600 hover:bg-gray-700 text-white border-gray-600'
 						>
-							<LogOut className='w-4 h-4' />
 							Logout
-						</button>
+						</Button>
 					</div>
 				</div>
 
@@ -386,13 +386,15 @@ const AdminPage: React.FC = () => {
 												<div className='flex items-start'>
 													<div className='flex-1'>
 														<div className='flex items-center gap-2 mb-1'>
-															<button
+															<Button
 																onClick={() => viewFile(file.file_id)}
-																className='text-sm font-medium text-primary-600 hover:text-primary-800 transition-colors text-left truncate max-w-xs'
+																variant='secondary'
+																size='sm'
+																className='text-left truncate max-w-xs p-0 bg-transparent border-none text-primary-600 hover:text-primary-800 hover:bg-transparent font-medium'
 																title={`View ${file.filename}`}
 															>
 																{file.filename}
-															</button>
+															</Button>
 															{file.has_password && (
 																<div title='Password protected'>
 																	<Lock className='w-3 h-3 text-yellow-600' />
@@ -436,36 +438,48 @@ const AdminPage: React.FC = () => {
 											</td>
 											<td className='px-6 py-4'>
 												<div className='flex items-center gap-2'>
-													<button
+													<Button
 														onClick={() => viewFile(file.file_id)}
-														className='p-2 text-green-600 hover:text-green-800 hover:bg-green-50 transition-colors'
+														variant='secondary'
+														size='sm'
+														icon={Eye}
+														className='p-2 text-green-600 hover:text-green-800 hover:bg-green-50 border-none bg-transparent'
 														title='View file'
 													>
-														<Eye className='w-4 h-4' />
-													</button>
-													<button
+														{''}
+													</Button>
+													<Button
 														onClick={() => copyFileUrl(file.file_id)}
-														className='p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 transition-colors'
+														variant='secondary'
+														size='sm'
+														icon={Copy}
+														className='p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 border-none bg-transparent'
 														title='Copy URL'
 													>
-														<Copy className='w-4 h-4' />
-													</button>
-													<button
+														{''}
+													</Button>
+													<Button
 														onClick={() => updateExpiration(file.file_id, file.filename)}
 														disabled={loading}
-														className='p-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50 transition-colors disabled:opacity-50'
+														variant='secondary'
+														size='sm'
+														icon={Clock}
+														className='p-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50 border-none bg-transparent'
 														title='Update expiration'
 													>
-														<Clock className='w-4 h-4' />
-													</button>
-													<button
+														{''}
+													</Button>
+													<Button
 														onClick={() => deleteFile(file.file_id, file.filename)}
 														disabled={loading}
-														className='p-2 text-red-600 hover:text-red-800 hover:bg-red-50 transition-colors disabled:opacity-50'
+														variant='danger'
+														size='sm'
+														icon={Trash2}
+														className='p-2 hover:bg-red-50 border-none bg-transparent text-red-600 hover:text-red-800'
 														title='Delete file'
 													>
-														<Trash2 className='w-4 h-4' />
-													</button>
+														{''}
+													</Button>
 												</div>
 											</td>
 										</tr>
