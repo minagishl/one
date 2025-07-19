@@ -147,12 +147,12 @@ const PreviewPage: React.FC = () => {
 	const handleDownload = async () => {
 		if (!metadata) return;
 
-		if (metadata.has_download_password) {
+		if (metadata.has_download_password && !isAdminMode) {
 			setPasswordDialogType('download');
 			setShowPasswordDialog(true);
 		} else {
 			try {
-				await downloadFile(metadata.id, metadata.filename);
+				await downloadFile(metadata.id, metadata.filename, undefined, isAdminMode ? adminToken : undefined);
 			} catch (error) {
 				alert('Download failed: ' + (error instanceof Error ? error.message : 'Unknown error'));
 			}
@@ -163,8 +163,24 @@ const PreviewPage: React.FC = () => {
 		if (!metadata) return;
 
 		if (window.confirm(`Are you sure you want to delete "${metadata.filename}"?`)) {
-			setPasswordDialogType('delete');
-			setShowPasswordDialog(true);
+			if (isAdminMode) {
+				// Admin mode: delete directly without password
+				try {
+					const result = await deleteFile(metadata.id, '', adminToken); // Empty password for admin
+					if (result.success) {
+						alert('File deleted successfully');
+						navigate('/');
+					} else {
+						alert('Delete failed: ' + (result.error || 'Unknown error'));
+					}
+				} catch (error) {
+					alert('Delete failed: ' + (error instanceof Error ? error.message : 'Unknown error'));
+				}
+			} else {
+				// Regular user: show password dialog
+				setPasswordDialogType('delete');
+				setShowPasswordDialog(true);
+			}
 		}
 	};
 
@@ -173,14 +189,14 @@ const PreviewPage: React.FC = () => {
 
 		if (passwordDialogType === 'download') {
 			try {
-				await downloadFile(metadata.id, metadata.filename, passwordInput);
+				await downloadFile(metadata.id, metadata.filename, passwordInput, isAdminMode ? adminToken : undefined);
 				setShowPasswordDialog(false);
 				setPasswordInput('');
 			} catch (error) {
 				alert('Download failed: ' + (error instanceof Error ? error.message : 'Unknown error'));
 			}
 		} else if (passwordDialogType === 'delete') {
-			const result = await deleteFile(metadata.id, passwordInput);
+			const result = await deleteFile(metadata.id, passwordInput, isAdminMode ? adminToken : undefined);
 			if (result.success) {
 				alert('File deleted successfully');
 				navigate('/');

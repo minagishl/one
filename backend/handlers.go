@@ -607,9 +607,19 @@ func (s *FileService) deleteFile(c *gin.Context) {
 		return
 	}
 
-	// Check delete password
+	// Check delete password (bypass for admin)
 	providedPassword := c.Query("delete_password")
-	if providedPassword != metadata.DeletePassword {
+	adminToken := c.Query("admin_token")
+	
+	isAdminAccess := false
+	if adminToken != "" {
+		if _, err := s.validateAdminToken(adminToken); err == nil {
+			isAdminAccess = true
+			log.Printf("Admin access granted for file deletion %s", fileID)
+		}
+	}
+	
+	if !isAdminAccess && providedPassword != metadata.DeletePassword {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"error":   "Invalid delete password",
 			"message": "The provided delete password is incorrect.",

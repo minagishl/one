@@ -59,12 +59,16 @@ export const uploadFile = async (file: File, downloadPassword?: string): Promise
 export const downloadFile = async (
 	fileId: string,
 	filename: string,
-	password?: string
+	password?: string,
+	adminToken?: string
 ): Promise<void> => {
 	try {
 		const url = new URL(`/api/file/${fileId}`, window.location.origin);
 		if (password) {
 			url.searchParams.append('password', password);
+		}
+		if (adminToken) {
+			url.searchParams.append('admin_token', adminToken);
 		}
 
 		const response = await fetch(url.toString());
@@ -93,11 +97,15 @@ export const downloadFile = async (
 
 export const deleteFile = async (
 	fileId: string,
-	deletePassword: string
+	deletePassword: string,
+	adminToken?: string
 ): Promise<{ success: boolean; error?: string }> => {
 	try {
 		const url = new URL(`/api/file/${fileId}`, window.location.origin);
 		url.searchParams.append('delete_password', deletePassword);
+		if (adminToken) {
+			url.searchParams.append('admin_token', adminToken);
+		}
 
 		const response = await fetch(url.toString(), { method: 'DELETE' });
 		const data = await response.json();
