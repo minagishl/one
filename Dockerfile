@@ -54,6 +54,9 @@ WORKDIR /app
 # Copy binary from builder stage
 COPY --from=backend-builder /app/backend/main .
 
+# Copy schema.sql file from builder stage
+COPY --from=backend-builder /app/backend/schema.sql .
+
 # Copy built frontend from frontend builder
 COPY --from=frontend-builder /app/static ./static
 

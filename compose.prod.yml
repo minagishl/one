@@ -15,8 +15,16 @@ services:
       - REDIS_POOL_SIZE=20
       - MAX_CONCURRENT_UPLOADS=10
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - DATABASE_HOST=postgres
+      - DATABASE_PORT=5432
+      - DATABASE_NAME=file_sharing
+      - DATABASE_USER=postgres
+      - DATABASE_PASSWORD=${DATABASE_PASSWORD:-postgres}
+      - DATABASE_SSL_MODE=require
     depends_on:
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     restart: unless-stopped
     networks:
@@ -81,6 +89,36 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      - POSTGRES_DB=file_sharing
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${DATABASE_PASSWORD:-postgres}
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - file-storage-network
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    security_opt:
+      - no-new-privileges:true
+
   # Optional: Add nginx reverse proxy for production
   nginx:
     image: nginx:alpine
@@ -106,6 +144,8 @@ services:
 
 volumes:
   redis_data:
+    driver: local
+  postgres_data:
     driver: local
   app_temp:
     driver: local

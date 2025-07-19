@@ -21,13 +21,7 @@ CREATE TABLE files (
     download_password VARCHAR(255),
     has_download_password BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-    
-    -- Add indexes for common queries
-    INDEX (expires_at),
-    INDEX (upload_time),
-    INDEX (storage_type),
-    INDEX (filename)
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 
 -- Chunk uploads table: Track chunked upload sessions
@@ -44,11 +38,7 @@ CREATE TABLE chunk_uploads (
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     last_activity TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
-    status VARCHAR(20) NOT NULL DEFAULT 'active', -- 'active', 'completed', 'failed', 'expired'
-    
-    INDEX (expires_at),
-    INDEX (last_activity),
-    INDEX (status)
+    status VARCHAR(20) NOT NULL DEFAULT 'active' -- 'active', 'completed', 'failed', 'expired'
 );
 
 -- Processing jobs table: Track background file processing jobs
@@ -62,11 +52,7 @@ CREATE TABLE processing_jobs (
     result_data JSONB, -- Store FileResult as JSON
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-    completed_at TIMESTAMP WITH TIME ZONE,
-    
-    INDEX (status),
-    INDEX (created_at),
-    INDEX (file_id)
+    completed_at TIMESTAMP WITH TIME ZONE
 );
 
 -- File access logs table: Track file downloads and access (optional, for analytics)
@@ -76,11 +62,7 @@ CREATE TABLE file_access_logs (
     access_type VARCHAR(20) NOT NULL, -- 'download', 'preview', 'stream'
     ip_address INET,
     user_agent TEXT,
-    access_time TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-    
-    INDEX (file_id),
-    INDEX (access_time),
-    INDEX (access_type)
+    access_time TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 
 -- Function to update updated_at timestamp
@@ -161,9 +143,26 @@ GROUP BY DATE_TRUNC('day', upload_time)
 ORDER BY upload_date DESC;
 
 -- Indexes for better performance
-CREATE INDEX CONCURRENTLY files_filename_trgm ON files USING gin (filename gin_trgm_ops);
-CREATE INDEX CONCURRENTLY files_composite_lookup ON files (id, expires_at) WHERE expires_at > NOW();
-CREATE INDEX CONCURRENTLY chunk_uploads_active ON chunk_uploads (upload_id, status) WHERE status = 'active';
+CREATE INDEX files_expires_at_idx ON files (expires_at);
+CREATE INDEX files_upload_time_idx ON files (upload_time);
+CREATE INDEX files_storage_type_idx ON files (storage_type);
+CREATE INDEX files_filename_idx ON files (filename);
+
+CREATE INDEX chunk_uploads_expires_at_idx ON chunk_uploads (expires_at);
+CREATE INDEX chunk_uploads_last_activity_idx ON chunk_uploads (last_activity);
+CREATE INDEX chunk_uploads_status_idx ON chunk_uploads (status);
+
+CREATE INDEX processing_jobs_status_idx ON processing_jobs (status);
+CREATE INDEX processing_jobs_created_at_idx ON processing_jobs (created_at);
+CREATE INDEX processing_jobs_file_id_idx ON processing_jobs (file_id);
+
+CREATE INDEX file_access_logs_file_id_idx ON file_access_logs (file_id);
+CREATE INDEX file_access_logs_access_time_idx ON file_access_logs (access_time);
+CREATE INDEX file_access_logs_access_type_idx ON file_access_logs (access_type);
+
+CREATE INDEX files_filename_trgm ON files USING gin (filename gin_trgm_ops);
+CREATE INDEX files_composite_lookup ON files (id, expires_at);
+CREATE INDEX chunk_uploads_active ON chunk_uploads (upload_id, status) WHERE status = 'active';
 
 -- Comments for documentation
 COMMENT ON TABLE files IS 'Stores metadata for uploaded files with expiration and storage information';

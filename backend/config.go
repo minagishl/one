@@ -64,12 +64,12 @@ func LoadConfig() *Config {
 		RedisDB:       getEnvInt("REDIS_DB", 0),
 
 		DatabaseURL:      getEnv("DATABASE_URL", ""),
-		DatabaseHost:     getEnv("DB_HOST", "localhost"),
-		DatabasePort:     getEnv("DB_PORT", "5432"),
-		DatabaseUser:     getEnv("DB_USER", "postgres"),
-		DatabasePassword: getEnv("DB_PASSWORD", ""),
-		DatabaseName:     getEnv("DB_NAME", "file_sharing"),
-		DatabaseSSLMode:  getEnv("DB_SSLMODE", "disable"),
+		DatabaseHost:     getEnv("DATABASE_HOST", "localhost"),
+		DatabasePort:     getEnv("DATABASE_PORT", "5432"),
+		DatabaseUser:     getEnv("DATABASE_USER", "postgres"),
+		DatabasePassword: getEnv("DATABASE_PASSWORD", ""),
+		DatabaseName:     getEnv("DATABASE_NAME", "file_sharing"),
+		DatabaseSSLMode:  getEnv("DATABASE_SSL_MODE", "disable"),
 		DatabaseMaxConns: getEnvInt("DB_MAX_CONNS", 20),
 		DatabaseMinConns: getEnvInt("DB_MIN_CONNS", 5),
 
@@ -94,6 +94,13 @@ func LoadConfig() *Config {
 
 		AdminPassword: getEnv("ADMIN_PASSWORD", ""),
 	}
+}
+
+func getEnv(key string, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
 }
 
 func getEnvInt(key string, defaultValue int) int {
