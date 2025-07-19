@@ -311,7 +311,7 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata, password, a
 			// For large video files, use optimized streaming endpoint
 			const isLargeVideo = metadata.size > 5 * 1024 * 1024; // 5MB threshold
 			let streamUrl = previewUrl;
-			
+
 			if (isLargeVideo) {
 				streamUrl = `/api/stream/${fileId}`;
 				const params = new URLSearchParams();
@@ -339,7 +339,7 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata, password, a
 			// For large audio files, use optimized streaming endpoint
 			const isLargeAudio = metadata.size > 5 * 1024 * 1024; // 5MB threshold
 			let streamUrl = previewUrl;
-			
+
 			if (isLargeAudio) {
 				streamUrl = `/api/stream/${fileId}`;
 				const params = new URLSearchParams();
@@ -404,7 +404,7 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata, password, a
 		}
 
 		return (
-			<div className='text-center py-16 text-gray-500 bg-gray-50 border border-gray-200'>
+			<div className='text-center p-16 text-gray-500 bg-gray-50 border border-gray-200'>
 				<div className='w-12 h-12 bg-gray-100 mx-auto mb-4 flex items-center justify-center'>
 					<File className='w-6 h-6 text-gray-500' />
 				</div>

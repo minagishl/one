@@ -704,6 +704,12 @@ func (s *FileService) previewFile(c *gin.Context) {
 		return
 	}
 
+	// Special handling for ZIP files - redirect to ZIP contents API
+	if metadata.MimeType == "application/zip" {
+		c.Redirect(http.StatusFound, fmt.Sprintf("/api/zip/%s", fileID))
+		return
+	}
+
 	// Set appropriate headers for preview
 	c.Header("Content-Type", metadata.MimeType)
 	c.Header("Content-Length", strconv.FormatInt(metadata.Size, 10))
@@ -886,19 +892,41 @@ func (s *FileService) fastStreamFile(c *gin.Context) {
 
 	fileID := c.Param("id")
 	log.Printf("fastStreamFile called for fileID: %s", fileID)
-	ctx := context.Background()
 
-	// Get metadata
-	metadataJSON, err := s.redis.Get(ctx, "file:"+fileID).Result()
+	// Get file metadata from PostgreSQL
+	fileStorage, err := s.db.GetFileMetadata(fileID)
 	if err != nil {
+		log.Printf("Failed to get file metadata from database: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+		return
+	}
+	
+	if fileStorage == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
 		return
 	}
 
-	var metadata FileMetadata
-	if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse metadata"})
-		return
+	// Convert database record to metadata
+	metadata := FileMetadata{
+		ID:                  fileStorage.ID,
+		Filename:           fileStorage.Filename,
+		Size:               fileStorage.OriginalSize,
+		CompressedSize:     0,
+		MimeType:           fileStorage.MimeType,
+		Compression:        CompressionType(fileStorage.CompressionType),
+		UploadTime:         fileStorage.UploadTime,
+		ExpiresAt:          fileStorage.ExpiresAt,
+		DeletePassword:     fileStorage.DeletePassword,
+		DownloadPassword:   "",
+		HasDownloadPassword: fileStorage.HasDownloadPassword,
+	}
+	
+	if fileStorage.CompressedSize != nil {
+		metadata.CompressedSize = *fileStorage.CompressedSize
+	}
+	
+	if fileStorage.DownloadPassword != nil {
+		metadata.DownloadPassword = *fileStorage.DownloadPassword
 	}
 
 	// Check if file has expired
@@ -1172,7 +1200,7 @@ func (s *FileService) streamOptimizedRangeFromRedis(c *gin.Context, compressedCo
 func isPreviewable(mimeType string) bool {
 	previewable := []string{
 		"image/", "text/", "application/json", "application/xml",
-		"video/", "audio/", "application/pdf",
+		"video/", "audio/", "application/pdf", "application/zip",
 	}
 
 	for _, prefix := range previewable {
@@ -1229,19 +1257,41 @@ func (s *FileService) getMetadata(c *gin.Context) {
 
 func (s *FileService) browseZip(c *gin.Context) {
 	fileID := c.Param("id")
-	ctx := context.Background()
 
-	// Get metadata
-	metadataJSON, err := s.redis.Get(ctx, "file:"+fileID).Result()
+	// Get file from PostgreSQL
+	fileStorage, err := s.db.GetFile(fileID)
 	if err != nil {
+		log.Printf("Failed to get file from database: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+		return
+	}
+	
+	if fileStorage == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
 		return
 	}
 
-	var metadata FileMetadata
-	if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse metadata"})
-		return
+	// Convert database record to metadata
+	metadata := FileMetadata{
+		ID:                  fileStorage.ID,
+		Filename:           fileStorage.Filename,
+		Size:               fileStorage.OriginalSize,
+		CompressedSize:     0,
+		MimeType:           fileStorage.MimeType,
+		Compression:        CompressionType(fileStorage.CompressionType),
+		UploadTime:         fileStorage.UploadTime,
+		ExpiresAt:          fileStorage.ExpiresAt,
+		DeletePassword:     fileStorage.DeletePassword,
+		DownloadPassword:   "",
+		HasDownloadPassword: fileStorage.HasDownloadPassword,
+	}
+	
+	if fileStorage.CompressedSize != nil {
+		metadata.CompressedSize = *fileStorage.CompressedSize
+	}
+	
+	if fileStorage.DownloadPassword != nil {
+		metadata.DownloadPassword = *fileStorage.DownloadPassword
 	}
 
 	// Check if file has expired
@@ -1256,19 +1306,11 @@ func (s *FileService) browseZip(c *gin.Context) {
 		return
 	}
 
-	// Get file content
-	compressedContent, err := s.redis.Get(ctx, "content:"+fileID).Result()
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "File content not found"})
-		return
-	}
-
+	// Get file content based on storage type
 	var content []byte
-	// Check if file is stored on disk
-	if strings.HasPrefix(compressedContent, "DISK:") {
+	if fileStorage.StorageType == "disk" && fileStorage.StoragePath != nil {
 		// Read from disk
-		diskPath := strings.TrimPrefix(compressedContent, "DISK:")
-		diskContent, err := os.ReadFile(diskPath)
+		diskContent, err := os.ReadFile(*fileStorage.StoragePath)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read file from disk"})
 			return
@@ -1281,8 +1323,14 @@ func (s *FileService) browseZip(c *gin.Context) {
 			return
 		}
 	} else {
-		// Read from Redis
-		content, err = s.compressor.Decompress([]byte(compressedContent), metadata.Compression)
+		// Read from PostgreSQL
+		if fileStorage.FileContent == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "File content not found"})
+			return
+		}
+
+		// Decompress file
+		content, err = s.compressor.Decompress(fileStorage.FileContent, metadata.Compression)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decompress file"})
 			return
@@ -1332,19 +1380,40 @@ func (s *FileService) extractZipFile(c *gin.Context) {
 
 	log.Printf("Extracting file '%s' from ZIP %s", fileName, fileID)
 
-	ctx := context.Background()
-
-	// Get metadata
-	metadataJSON, err := s.redis.Get(ctx, "file:"+fileID).Result()
+	// Get file from PostgreSQL
+	fileStorage, err := s.db.GetFile(fileID)
 	if err != nil {
+		log.Printf("Failed to get file from database: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+		return
+	}
+	
+	if fileStorage == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
 		return
 	}
 
-	var metadata FileMetadata
-	if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse metadata"})
-		return
+	// Convert database record to metadata
+	metadata := FileMetadata{
+		ID:                  fileStorage.ID,
+		Filename:           fileStorage.Filename,
+		Size:               fileStorage.OriginalSize,
+		CompressedSize:     0,
+		MimeType:           fileStorage.MimeType,
+		Compression:        CompressionType(fileStorage.CompressionType),
+		UploadTime:         fileStorage.UploadTime,
+		ExpiresAt:          fileStorage.ExpiresAt,
+		DeletePassword:     fileStorage.DeletePassword,
+		DownloadPassword:   "",
+		HasDownloadPassword: fileStorage.HasDownloadPassword,
+	}
+	
+	if fileStorage.CompressedSize != nil {
+		metadata.CompressedSize = *fileStorage.CompressedSize
+	}
+	
+	if fileStorage.DownloadPassword != nil {
+		metadata.DownloadPassword = *fileStorage.DownloadPassword
 	}
 
 	// Check if file has expired
@@ -1359,19 +1428,11 @@ func (s *FileService) extractZipFile(c *gin.Context) {
 		return
 	}
 
-	// Get file content
-	compressedContent, err := s.redis.Get(ctx, "content:"+fileID).Result()
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "File content not found"})
-		return
-	}
-
+	// Get file content based on storage type
 	var content []byte
-	// Check if file is stored on disk
-	if strings.HasPrefix(compressedContent, "DISK:") {
+	if fileStorage.StorageType == "disk" && fileStorage.StoragePath != nil {
 		// Read from disk
-		diskPath := strings.TrimPrefix(compressedContent, "DISK:")
-		diskContent, err := os.ReadFile(diskPath)
+		diskContent, err := os.ReadFile(*fileStorage.StoragePath)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read file from disk"})
 			return
@@ -1384,8 +1445,14 @@ func (s *FileService) extractZipFile(c *gin.Context) {
 			return
 		}
 	} else {
-		// Read from Redis
-		content, err = s.compressor.Decompress([]byte(compressedContent), metadata.Compression)
+		// Read from PostgreSQL
+		if fileStorage.FileContent == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "File content not found"})
+			return
+		}
+
+		// Decompress file
+		content, err = s.compressor.Decompress(fileStorage.FileContent, metadata.Compression)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decompress file"})
 			return

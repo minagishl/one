@@ -210,6 +210,8 @@ func GetMimeType(filename string) string {
 		return "audio/flac"
 	case ".m4a":
 		return "audio/mp4"
+	case ".zip":
+		return "application/zip"
 	}
 	
 	// Try Go standard library as fallback
