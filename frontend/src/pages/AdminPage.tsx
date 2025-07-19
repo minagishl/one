@@ -281,6 +281,14 @@ const AdminPage: React.FC = () => {
 								</Button>
 							</form>
 						</div>
+						<div className='text-center mt-4'>
+							<p className='text-sm text-gray-500'>
+								Back to{' '}
+								<a href='/' className='text-primary-500 hover:text-primary-600'>
+									Home
+								</a>
+							</p>
+						</div>
 					</div>
 				</main>
 				<Footer />
