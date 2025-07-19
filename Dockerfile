@@ -66,13 +66,13 @@ RUN chown -R appuser:appuser /app
 # Switch to non-root user
 USER appuser
 
-# Create temp directory for file uploads in /tmp (world-writable)
-RUN mkdir -p /tmp/one-uploads && \
-    mkdir -p /tmp/one-uploads/files && \
-    chmod 755 /tmp/one-uploads
+# Create temp directory for file uploads in /app/temp (persistent)
+RUN mkdir -p /app/temp && \
+    mkdir -p /app/temp/files && \
+    chmod 755 /app/temp
 
 # Set environment variable for temp directory
-ENV TEMP_DIR=/tmp/one-uploads
+ENV TEMP_DIR=/app/temp
 
 # Expose port
 EXPOSE 8080
