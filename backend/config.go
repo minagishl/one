@@ -51,7 +51,7 @@ func LoadConfig() *Config {
 
 		MaxFileSize:       getEnvInt64("MAX_FILE_SIZE", 10*1024*1024*1024), // 10GB
 		MaxFilesPerUser:   getEnvInt("MAX_FILES_PER_USER", 1000),
-		AllowedExtensions: []string{}, // Empty means all extensions allowed
+		AllowedExtensions: []string{},                                    // Empty means all extensions allowed
 		ChunkThreshold:    getEnvInt64("CHUNK_THRESHOLD", 100*1024*1024), // 100MB threshold
 
 		// Chunk upload settings
@@ -63,8 +63,8 @@ func LoadConfig() *Config {
 		CompressionLevel:     getEnvInt("COMPRESSION_LEVEL", 6),
 		EnableStreaming:      getEnvBool("ENABLE_STREAMING", true),
 		MaxConcurrentUploads: getEnvInt("MAX_CONCURRENT_UPLOADS", 50),
-		RequestTimeout:       getEnvDuration("REQUEST_TIMEOUT", "2m"), // Reduced for better concurrency
-		RedisPoolSize:        getEnvInt("REDIS_POOL_SIZE", 100),       // Increased for high concurrency
+		RequestTimeout:       getEnvDuration("REQUEST_TIMEOUT", "15m"), // Increased for large file processing
+		RedisPoolSize:        getEnvInt("REDIS_POOL_SIZE", 100),        // Increased for high concurrency
 		RedisMaxIdleConns:    getEnvInt("REDIS_MAX_IDLE_CONNS", 20),
 		RedisIdleTimeout:     getEnvDuration("REDIS_IDLE_TIMEOUT", "5m"),
 	}

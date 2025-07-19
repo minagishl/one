@@ -227,7 +227,48 @@ export class ChunkUploader {
 			throw new Error(error.error || 'Failed to complete upload');
 		}
 
-		return await response.json();
+		const result = await response.json();
+		
+		// Handle async processing
+		if (result.job_id) {
+			return await this.pollJobStatus(result.job_id);
+		}
+		
+		// Handle legacy synchronous response
+		return result;
+	}
+
+	private static async pollJobStatus(jobId: string): Promise<any> {
+		while (true) {
+			const response = await fetch(`/api/job/${jobId}/status`);
+			
+			if (!response.ok) {
+				throw new Error('Failed to check job status');
+			}
+			
+			const job = await response.json();
+			
+			switch (job.status) {
+				case 'completed':
+					return {
+						file_id: job.result.file_id,
+						metadata: {
+							delete_password: job.result.delete_password || null,
+							filename: job.result.filename,
+							size: job.result.size,
+						}
+					};
+				case 'failed':
+					throw new Error(job.error || 'File processing failed');
+				case 'processing':
+				case 'pending':
+					// Wait 2 seconds before polling again
+					await this.delay(2000);
+					break;
+				default:
+					throw new Error(`Unknown job status: ${job.status}`);
+			}
+		}
 	}
 
 	private static delay(ms: number): Promise<void> {

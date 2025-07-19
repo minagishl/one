@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
+	"golang.org/x/sys/unix"
 )
 
 type ChunkUpload struct {
@@ -30,10 +31,31 @@ type ChunkUpload struct {
 	HasDownloadPassword bool      `json:"has_download_password"`
 }
 
+type ProcessingJob struct {
+	JobID     string      `json:"job_id"`
+	UploadID  string      `json:"upload_id"`
+	FileID    string      `json:"file_id"`
+	Status    string      `json:"status"`   // pending, processing, completed, failed
+	Progress  int         `json:"progress"` // 0-100
+	Error     string      `json:"error,omitempty"`
+	Result    *FileResult `json:"result,omitempty"`
+	CreatedAt time.Time   `json:"created_at"`
+	UpdatedAt time.Time   `json:"updated_at"`
+}
+
+type FileResult struct {
+	FileID         string `json:"file_id"`
+	Filename       string `json:"filename"`
+	URL            string `json:"url"`
+	Size           int64  `json:"size"`
+	DeletePassword string `json:"delete_password,omitempty"`
+}
+
 type ChunkUploadManager struct {
 	redis   *redis.Client
 	config  *Config
 	uploads sync.Map // map[string]*ChunkUpload
+	jobs    sync.Map // map[string]*ProcessingJob
 }
 
 func NewChunkUploadManager(redis *redis.Client, config *Config) *ChunkUploadManager {
@@ -66,6 +88,12 @@ func (m *ChunkUploadManager) cleanupExpiredUploads() {
 	ctx := context.Background()
 	now := time.Now()
 
+	// First, check if disk space is low and do aggressive cleanup
+	if err := m.checkDiskSpace(5 * 1024 * 1024 * 1024); err != nil { // 5GB threshold
+		fmt.Printf("Low disk space detected, performing aggressive cleanup: %v\n", err)
+		m.aggressiveCleanup()
+	}
+
 	// Get all chunk uploads from Redis
 	keys, err := m.redis.Keys(ctx, "chunk_upload:*").Result()
 	if err != nil {
@@ -88,6 +116,39 @@ func (m *ChunkUploadManager) cleanupExpiredUploads() {
 			m.cleanupUpload(upload.UploadID)
 		}
 	}
+}
+
+// aggressiveCleanup removes all temporary files when disk space is low
+func (m *ChunkUploadManager) aggressiveCleanup() {
+	tempDir := m.config.TempDir
+	
+	// Remove all assembled files older than 1 hour
+	filepath.Walk(tempDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		
+		if info.IsDir() {
+			return nil
+		}
+		
+		// Remove old assembled files and orphaned chunks
+		if info.ModTime().Before(time.Now().Add(-1 * time.Hour)) {
+			fmt.Printf("Removing old temp file: %s\n", path)
+			os.Remove(path)
+		}
+		
+		return nil
+	})
+	
+	// Force cleanup of all expired uploads
+	m.uploads.Range(func(key, value interface{}) bool {
+		upload := value.(*ChunkUpload)
+		if time.Since(upload.LastActivity) > 10*time.Minute {
+			m.cleanupUpload(upload.UploadID)
+		}
+		return true
+	})
 }
 
 func (m *ChunkUploadManager) cleanupUpload(uploadID string) {
@@ -353,58 +414,157 @@ func (m *ChunkUploadManager) CompleteUpload(c *gin.Context) {
 		}
 	}
 
-	// Assemble file from chunks
+	// Create processing job for background processing
 	fileID := generateFileID()
-	assembledFile, err := m.assembleFile(upload, fileID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to assemble file: " + err.Error()})
-		return
-	}
-	defer assembledFile.Close()
+	jobID := generateFileID() // Reuse the same function for job ID
 
-	// Skip hash verification for now to avoid processing overhead
-	// In production, consider implementing server-side hash verification
-	if upload.FileHash != "" {
-		// Log that hash verification is skipped
-		fmt.Printf("Hash verification skipped for file: %s\n", upload.Filename)
+	job := &ProcessingJob{
+		JobID:     jobID,
+		UploadID:  uploadID,
+		FileID:    fileID,
+		Status:    "pending",
+		Progress:  0,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
 	}
 
-	// Reset file pointer
-	if _, err := assembledFile.Seek(0, 0); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to reset file pointer"})
-		return
-	}
+	// Store job in memory and Redis
+	m.jobs.Store(jobID, job)
+	ctx := context.Background()
+	jobJSON, _ := json.Marshal(job)
+	m.redis.Set(ctx, "processing_job:"+jobID, jobJSON, 24*time.Hour)
 
-	// Read file content for compression and storage
-	content, err := io.ReadAll(assembledFile)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read assembled file"})
-		return
-	}
-
-	// Get file service from context (assuming it's set in middleware)
+	// Get file service from context
 	fileService, exists := c.Get("fileService")
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "File service not available"})
 		return
 	}
-
 	fs := fileService.(*FileService)
 
-	// Store file using existing file service logic
-	result, err := m.storeAssembledFile(fs, fileID, upload.Filename, content, upload.DownloadPassword)
+	// Start background processing
+	go m.processFileInBackground(job, upload, fs)
+
+	// Return job ID immediately for client polling
+	c.JSON(http.StatusAccepted, gin.H{
+		"job_id":  jobID,
+		"status":  "pending",
+		"message": "File processing started. Use the job_id to check status.",
+	})
+}
+
+func (m *ChunkUploadManager) processFileInBackground(job *ProcessingJob, upload *ChunkUpload, fs *FileService) {
+	// Update job status to processing
+	job.Status = "processing"
+	job.Progress = 10
+	job.UpdatedAt = time.Now()
+	m.updateJob(job)
+
+	// Assemble file from chunks with streaming approach
+	assembledFile, err := m.assembleFileStreaming(upload, job.FileID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to store file: " + err.Error()})
+		job.Status = "failed"
+		job.Error = "Failed to assemble file: " + err.Error()
+		job.UpdatedAt = time.Now()
+		m.updateJob(job)
+		return
+	}
+	defer assembledFile.Close()
+
+	// Update progress
+	job.Progress = 50
+	job.UpdatedAt = time.Now()
+	m.updateJob(job)
+
+	// Get file info
+	fileInfo, err := assembledFile.Stat()
+	if err != nil {
+		job.Status = "failed"
+		job.Error = "Failed to get file info: " + err.Error()
+		job.UpdatedAt = time.Now()
+		m.updateJob(job)
 		return
 	}
 
-	// Cleanup upload session
-	m.cleanupUpload(uploadID)
+	// Store file with streaming approach
+	result, err := m.storeAssembledFileStreaming(fs, job.FileID, upload.Filename, assembledFile, upload.DownloadPassword)
+	if err != nil {
+		job.Status = "failed"
+		job.Error = "Failed to store file: " + err.Error()
+		job.UpdatedAt = time.Now()
+		m.updateJob(job)
+		return
+	}
 
-	c.JSON(http.StatusOK, result)
+	// Update progress
+	job.Progress = 90
+	job.UpdatedAt = time.Now()
+	m.updateJob(job)
+
+	// Cleanup upload session
+	m.cleanupUpload(upload.UploadID)
+
+	// Complete job
+	job.Status = "completed"
+	job.Progress = 100
+	
+	// Extract metadata from result
+	var deletePassword string
+	if metadata, ok := result["metadata"].(FileMetadata); ok {
+		deletePassword = metadata.DeletePassword
+	}
+	
+	job.Result = &FileResult{
+		FileID:         result["file_id"].(string),
+		Filename:       upload.Filename,
+		URL:            "/file/" + result["file_id"].(string),
+		Size:           fileInfo.Size(),
+		DeletePassword: deletePassword,
+	}
+	job.UpdatedAt = time.Now()
+	m.updateJob(job)
 }
 
-func (m *ChunkUploadManager) assembleFile(upload *ChunkUpload, fileID string) (*os.File, error) {
+func (m *ChunkUploadManager) updateJob(job *ProcessingJob) {
+	m.jobs.Store(job.JobID, job)
+	ctx := context.Background()
+	jobJSON, _ := json.Marshal(job)
+	m.redis.Set(ctx, "processing_job:"+job.JobID, jobJSON, 24*time.Hour)
+}
+
+func (m *ChunkUploadManager) GetJobStatus(c *gin.Context) {
+	jobID := c.Param("job_id")
+
+	// Get job from memory or Redis
+	jobValue, exists := m.jobs.Load(jobID)
+	if !exists {
+		ctx := context.Background()
+		jobJSON, err := m.redis.Get(ctx, "processing_job:"+jobID).Result()
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Job not found"})
+			return
+		}
+
+		var job ProcessingJob
+		if err := json.Unmarshal([]byte(jobJSON), &job); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse job"})
+			return
+		}
+
+		jobValue = &job
+		m.jobs.Store(jobID, jobValue)
+	}
+
+	job := jobValue.(*ProcessingJob)
+	c.JSON(http.StatusOK, job)
+}
+
+func (m *ChunkUploadManager) assembleFileStreaming(upload *ChunkUpload, fileID string) (*os.File, error) {
+	// Check available disk space before assembly
+	if err := m.checkDiskSpace(upload.TotalSize * 2); err != nil {
+		return nil, fmt.Errorf("insufficient disk space: %v", err)
+	}
+
 	// Create final file
 	finalPath := filepath.Join(m.config.TempDir, fileID+"_assembled")
 	finalFile, err := os.Create(finalPath)
@@ -440,6 +600,132 @@ func (m *ChunkUploadManager) assembleFile(upload *ChunkUpload, fileID string) (*
 	}
 
 	return finalFile, nil
+}
+
+// checkDiskSpace checks if there's enough available disk space
+func (m *ChunkUploadManager) checkDiskSpace(requiredBytes int64) error {
+	tempDir := m.config.TempDir
+	
+	// Get filesystem stats for temp directory
+	var stat unix.Statfs_t
+	if err := unix.Statfs(tempDir, &stat); err != nil {
+		return fmt.Errorf("failed to get filesystem stats: %v", err)
+	}
+	
+	// Calculate available space
+	availableBytes := int64(stat.Bavail) * int64(stat.Bsize)
+	
+	// Require 1GB buffer + required bytes
+	minRequired := requiredBytes + (1024 * 1024 * 1024)
+	
+	if availableBytes < minRequired {
+		return fmt.Errorf("insufficient disk space: available %d bytes, required %d bytes", 
+			availableBytes, minRequired)
+	}
+	
+	return nil
+}
+
+func (m *ChunkUploadManager) storeAssembledFileStreaming(fs *FileService, fileID, filename string, file *os.File, downloadPassword string) (map[string]interface{}, error) {
+	// Get file size
+	fileInfo, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	fileSize := fileInfo.Size()
+
+	// Read file content for storage decision
+	var content []byte
+
+	// For very large files (>100MB), store directly on disk without compression
+	if fileSize > 100*1024*1024 {
+		// Store large file directly without loading into memory
+		storagePath := filepath.Join(fs.config.TempDir, "files", fileID)
+
+		// Create directory if needed
+		if err := os.MkdirAll(filepath.Dir(storagePath), 0755); err != nil {
+			return nil, err
+		}
+
+		// Copy file to final location
+		destFile, err := os.Create(storagePath)
+		if err != nil {
+			return nil, err
+		}
+		defer destFile.Close()
+
+		// Reset file pointer
+		if _, err := file.Seek(0, 0); err != nil {
+			return nil, err
+		}
+
+		// Stream copy without loading into memory
+		if _, err := io.Copy(destFile, file); err != nil {
+			return nil, err
+		}
+
+		// Generate random delete password
+		deletePassword := generateRandomPassword()
+		
+		// Create metadata for large file
+		now := time.Now()
+		expiresAt := now.Add(24 * time.Hour)
+		detectedMimeType := GetMimeType(filename)
+		
+		metadata := FileMetadata{
+			ID:                  fileID,
+			Filename:            filename,
+			Size:                fileSize,
+			MimeType:            detectedMimeType,
+			UploadTime:          now,
+			ExpiresAt:           expiresAt,
+			Compression:         CompressionNone,
+			DeletePassword:      deletePassword,
+			DownloadPassword:    downloadPassword,
+			HasDownloadPassword: downloadPassword != "",
+		}
+		
+		// Store file reference and metadata in Redis
+		ctx := context.Background()
+		expiration := 24 * time.Hour
+		
+		// Store file path reference
+		if err := fs.redis.Set(ctx, "content:"+fileID, "DISK:"+storagePath, expiration).Err(); err != nil {
+			return nil, fmt.Errorf("failed to store file reference: %v", err)
+		}
+		
+		// Store metadata
+		metadataJSON, err := json.Marshal(metadata)
+		if err != nil {
+			return nil, err
+		}
+		
+		if err := fs.redis.Set(ctx, "file:"+fileID, metadataJSON, expiration).Err(); err != nil {
+			return nil, err
+		}
+		
+		// Add to file list
+		if err := fs.redis.ZAdd(ctx, "files", &redis.Z{
+			Score:  float64(expiresAt.Unix()),
+			Member: fileID,
+		}).Err(); err != nil {
+			return nil, err
+		}
+		
+		return map[string]interface{}{
+			"message":  "File uploaded successfully",
+			"file_id":  fileID,
+			"metadata": metadata,
+		}, nil
+	}
+
+	// For smaller files, use existing compression logic
+	content, err = io.ReadAll(file)
+	if err != nil {
+		return nil, err
+	}
+
+	return m.storeAssembledFile(fs, fileID, filename, content, downloadPassword)
 }
 
 func (m *ChunkUploadManager) storeAssembledFile(fs *FileService, fileID, filename string, content []byte, downloadPassword string) (map[string]interface{}, error) {
