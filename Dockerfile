@@ -63,13 +63,13 @@ COPY --from=frontend-builder /app/static ./static
 # Change ownership to non-root user
 RUN chown -R appuser:appuser /app
 
+# Switch to non-root user
+USER appuser
+
 # Create temp directory for file uploads in /tmp (world-writable)
 RUN mkdir -p /tmp/one-uploads && \
     mkdir -p /tmp/one-uploads/files && \
-    chmod 777 /tmp/one-uploads
-
-# Switch to non-root user
-USER appuser
+    chmod 755 /tmp/one-uploads
 
 # Set environment variable for temp directory
 ENV TEMP_DIR=/tmp/one-uploads
