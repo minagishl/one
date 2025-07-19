@@ -113,10 +113,43 @@ export const deleteFile = async (
 };
 
 export const getFileMetadata = async (fileId: string): Promise<FileMetadata> => {
+	// First try the status endpoint to handle processing files
+	const statusResponse = await fetch(`/api/file/${fileId}/status`);
+	if (statusResponse.ok) {
+		const status = await statusResponse.json();
+		if (status.status === 'ready' && status.metadata) {
+			return status.metadata;
+		} else if (status.status === 'processing') {
+			// Return a temporary metadata object for processing files
+			throw new Error('File is currently being processed. Please wait a moment and try again.');
+		}
+	}
+
+	// Fallback to metadata endpoint for legacy files
 	const response = await fetch(`/api/metadata/${fileId}`);
 	if (!response.ok) {
 		const error = await response.json();
 		throw new Error(error.error || 'File not found or expired');
+	}
+
+	return await response.json();
+};
+
+export const getFileStatus = async (fileId: string): Promise<{
+	status: 'ready' | 'processing' | 'not_found' | 'error';
+	message: string;
+	download_url?: string;
+	preview_url?: string;
+	metadata?: FileMetadata;
+	filename?: string;
+}> => {
+	const response = await fetch(`/api/file/${fileId}/status`);
+	
+	if (!response.ok) {
+		return {
+			status: 'error',
+			message: 'Failed to check file status'
+		};
 	}
 
 	return await response.json();

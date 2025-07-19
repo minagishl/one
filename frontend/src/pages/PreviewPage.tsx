@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { AlertTriangle, ArrowLeft, Download, Trash2 } from 'lucide-react';
 import FilePreview from '../components/FilePreview';
 import { FileMetadata } from '../types';
-import { downloadFile, deleteFile, getFileMetadata, getFilePreview } from '../utils/api';
+import { downloadFile, deleteFile, getFileMetadata, getFilePreview, getFileStatus } from '../utils/api';
 import { formatSize, formatDate, formatCountdown } from '../utils/format';
 
 const PreviewPage: React.FC = () => {
@@ -17,6 +17,8 @@ const PreviewPage: React.FC = () => {
 	const [passwordInput, setPasswordInput] = useState('');
 	const [previewPassword, setPreviewPassword] = useState<string>('');
 	const [isPreviewAuthenticated, setIsPreviewAuthenticated] = useState(false);
+	const [isProcessing, setIsProcessing] = useState(false);
+	const [processingMessage, setProcessingMessage] = useState('');
 
 	useEffect(() => {
 		if (fileId) {
@@ -37,14 +39,55 @@ const PreviewPage: React.FC = () => {
 		if (!fileId) return;
 
 		try {
-			const metadata = await getFileMetadata(fileId);
-			setMetadata(metadata);
-			setError('');
+			// First check file status
+			const status = await getFileStatus(fileId);
+			
+			if (status.status === 'processing') {
+				setIsProcessing(true);
+				setProcessingMessage(status.message);
+				setError('');
+				setMetadata(null);
+				
+				// Set up polling to check when processing is complete
+				const pollInterval = setInterval(async () => {
+					try {
+						const updatedStatus = await getFileStatus(fileId);
+						if (updatedStatus.status === 'ready' && updatedStatus.metadata) {
+							setIsProcessing(false);
+							setProcessingMessage('');
+							setMetadata(updatedStatus.metadata);
+							clearInterval(pollInterval);
+						} else if (updatedStatus.status === 'error' || updatedStatus.status === 'not_found') {
+							setIsProcessing(false);
+							setProcessingMessage('');
+							setError(updatedStatus.message);
+							clearInterval(pollInterval);
+						}
+					} catch (err) {
+						console.error('Error polling file status:', err);
+					}
+				}, 3000); // Poll every 3 seconds
+				
+				// Clear interval after 5 minutes to avoid infinite polling
+				setTimeout(() => clearInterval(pollInterval), 5 * 60 * 1000);
+				
+			} else if (status.status === 'ready' && status.metadata) {
+				setIsProcessing(false);
+				setProcessingMessage('');
+				setMetadata(status.metadata);
+				setError('');
+			} else {
+				setIsProcessing(false);
+				setProcessingMessage('');
+				setError(status.message);
+			}
 			
 			// Reset preview authentication when metadata changes
 			setIsPreviewAuthenticated(false);
 			setPreviewPassword('');
 		} catch (err) {
+			setIsProcessing(false);
+			setProcessingMessage('');
 			setError(err instanceof Error ? err.message : 'File not found or expired');
 		}
 	};
@@ -134,6 +177,25 @@ const PreviewPage: React.FC = () => {
 					</div>
 					<h1 className='text-2xl font-medium text-gray-900 mb-4'>File Not Found</h1>
 					<p className='text-gray-600 mb-8'>{error}</p>
+					<button
+						onClick={() => navigate('/')}
+						className='btn-primary inline-flex items-center gap-2'
+					>
+						<ArrowLeft className='w-4 h-4' />
+						Go Back
+					</button>
+				</div>
+			</div>
+		);
+	}
+
+	if (isProcessing) {
+		return (
+			<div className='min-h-screen bg-gray-25 flex items-center justify-center'>
+				<div className='text-center max-w-md mx-auto px-6'>
+					<div className='animate-spin w-8 h-8 border-2 border-gray-200 border-t-primary-500 rounded-full mx-auto mb-4'></div>
+					<h2 className='text-xl font-medium text-gray-900 mb-2'>Processing File</h2>
+					<p className='text-gray-600 mb-6'>{processingMessage}</p>
 					<button
 						onClick={() => navigate('/')}
 						className='btn-primary inline-flex items-center gap-2'

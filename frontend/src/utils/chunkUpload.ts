@@ -229,47 +229,23 @@ export class ChunkUploader {
 
 		const result = await response.json();
 		
-		// Handle async processing
-		if (result.job_id) {
-			return await this.pollJobStatus(result.job_id);
+		// Handle async processing - return file_id immediately for status checking
+		if (result.job_id && result.file_id) {
+			// Start background processing but return immediately with file_id
+			// The frontend will use the status endpoint to check if file is ready
+			return {
+				file_id: result.file_id,
+				metadata: {
+					filename: 'Processing...',
+					processing: true,
+				}
+			};
 		}
 		
 		// Handle legacy synchronous response
 		return result;
 	}
 
-	private static async pollJobStatus(jobId: string): Promise<any> {
-		while (true) {
-			const response = await fetch(`/api/job/${jobId}/status`);
-			
-			if (!response.ok) {
-				throw new Error('Failed to check job status');
-			}
-			
-			const job = await response.json();
-			
-			switch (job.status) {
-				case 'completed':
-					return {
-						file_id: job.result.file_id,
-						metadata: {
-							delete_password: job.result.delete_password || null,
-							filename: job.result.filename,
-							size: job.result.size,
-						}
-					};
-				case 'failed':
-					throw new Error(job.error || 'File processing failed');
-				case 'processing':
-				case 'pending':
-					// Wait 2 seconds before polling again
-					await this.delay(2000);
-					break;
-				default:
-					throw new Error(`Unknown job status: ${job.status}`);
-			}
-		}
-	}
 
 	private static delay(ms: number): Promise<void> {
 		return new Promise((resolve) => setTimeout(resolve, ms));
@@ -281,6 +257,27 @@ export class ChunkUploader {
 		if (!response.ok) {
 			const error = await response.json();
 			throw new Error(error.error || 'Failed to get upload status');
+		}
+
+		return await response.json();
+	}
+
+	// Check if a file is ready for download or still processing
+	public static async getFileStatus(fileId: string): Promise<{
+		status: 'ready' | 'processing' | 'not_found' | 'error';
+		message: string;
+		download_url?: string;
+		preview_url?: string;
+		metadata?: any;
+		filename?: string;
+	}> {
+		const response = await fetch(`/api/file/${fileId}/status`);
+		
+		if (!response.ok) {
+			return {
+				status: 'error',
+				message: 'Failed to check file status'
+			};
 		}
 
 		return await response.json();

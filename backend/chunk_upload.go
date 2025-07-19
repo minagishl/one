@@ -442,14 +442,23 @@ func (m *ChunkUploadManager) CompleteUpload(c *gin.Context) {
 	}
 	fs := fileService.(*FileService)
 
+	// Store initial processing status in Redis for file status endpoint
+	statusJSON, _ := json.Marshal(map[string]interface{}{
+		"status": "processing",
+		"filename": upload.Filename,
+		"job_id": jobID,
+	})
+	fs.redis.Set(ctx, "processing:"+fileID, statusJSON, 1*time.Hour)
+
 	// Start background processing
 	go m.processFileInBackground(job, upload, fs)
 
 	// Return job ID immediately for client polling
 	c.JSON(http.StatusAccepted, gin.H{
 		"job_id":  jobID,
+		"file_id": fileID,
 		"status":  "pending",
-		"message": "File processing started. Use the job_id to check status.",
+		"message": "File processing started. Use the file_id to check status at /api/file/{file_id}/status",
 	})
 }
 
@@ -523,6 +532,14 @@ func (m *ChunkUploadManager) processFileInBackground(job *ProcessingJob, upload 
 	}
 	job.UpdatedAt = time.Now()
 	m.updateJob(job)
+	
+	// Store processing status in Redis for file status endpoint
+	ctx := context.Background()
+	statusJSON, _ := json.Marshal(map[string]interface{}{
+		"status": "completed",
+		"file_id": job.FileID,
+	})
+	fs.redis.Set(ctx, "processing:"+job.FileID, statusJSON, 1*time.Hour)
 }
 
 func (m *ChunkUploadManager) updateJob(job *ProcessingJob) {

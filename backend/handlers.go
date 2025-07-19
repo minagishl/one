@@ -81,6 +81,84 @@ func convertToUTF8(input string) string {
 	return input
 }
 
+// getFileStatus returns processing status or direct access for files
+func (s *FileService) getFileStatus(c *gin.Context) {
+	fileID := c.Param("id")
+	ctx := context.Background()
+
+	// First check if there's a processing status for this file
+	processingJSON, err := s.redis.Get(ctx, "processing:"+fileID).Result()
+	if err == nil {
+		var processingStatus map[string]interface{}
+		if json.Unmarshal([]byte(processingJSON), &processingStatus) == nil {
+			status, _ := processingStatus["status"].(string)
+			if status == "processing" {
+				filename, _ := processingStatus["filename"].(string)
+				c.JSON(http.StatusAccepted, gin.H{
+					"status": "processing",
+					"message": "Your file is currently being processed. Please wait a moment and try again.",
+					"filename": filename,
+					"estimated_time": "A few moments",
+				})
+				return
+			}
+		}
+	}
+
+	// Check if file exists in metadata
+	metadataJSON, err := s.redis.Get(ctx, "file:"+fileID).Result()
+	if err == redis.Nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"status": "not_found",
+			"message": "File not found or may still be processing"})
+		return
+	} else if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status": "error",
+			"message": "Failed to check file status"})
+		return
+	}
+
+	// File exists, parse metadata
+	var metadata FileMetadata
+	if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status": "error",
+			"message": "Failed to parse file metadata"})
+		return
+	}
+
+	// Check if file content is available
+	contentExists, err := s.redis.Exists(ctx, "content:"+fileID).Result()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status": "error",
+			"message": "Failed to check file content availability"})
+		return
+	}
+
+	if contentExists > 0 {
+		// File is ready, remove processing status
+		s.redis.Del(ctx, "processing:"+fileID)
+		
+		c.JSON(http.StatusOK, gin.H{
+			"status": "ready",
+			"message": "File is ready for download",
+			"metadata": metadata,
+			"download_url": "/api/file/" + fileID,
+			"preview_url": "/api/preview/" + fileID,
+		})
+	} else {
+		// File metadata exists but content is not ready (still processing)
+		c.JSON(http.StatusAccepted, gin.H{
+			"status": "processing",
+			"message": "Your file is currently being processed. Please wait a moment and try again.",
+			"filename": metadata.Filename,
+			"estimated_time": "A few moments",
+		})
+	}
+}
+
 // containsJapanese checks if the string contains Japanese characters
 func containsJapanese(s string) bool {
 	for _, r := range s {
