@@ -36,10 +36,10 @@ func main() {
 		PoolSize:     config.RedisPoolSize,
 		MinIdleConns: config.RedisMaxIdleConns,
 		MaxRetries:   3,
-		ReadTimeout:  30 * time.Second,  // Reduced for better concurrency
+		ReadTimeout:  30 * time.Second, // Reduced for better concurrency
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  config.RedisIdleTimeout,
-		PoolTimeout:  5 * time.Second,   // Timeout when getting connection from pool
+		PoolTimeout:  5 * time.Second, // Timeout when getting connection from pool
 	})
 
 	// Test Redis connection
@@ -110,6 +110,7 @@ func main() {
 	router.Static("/assets", "./static/assets")
 	router.StaticFile("/favicon.ico", "./static/favicon.ico")
 	router.StaticFile("/logo.svg", "./static/logo.svg")
+	router.StaticFile("/ogp.png", "./static/ogp.png")
 
 	// SPA routes - serve React app for any non-API route
 	router.NoRoute(func(c *gin.Context) {
@@ -139,12 +140,12 @@ func main() {
 	}
 
 	server := &http.Server{
-		Addr:         config.Host + ":" + config.Port,
-		Handler:      router,
-		ReadTimeout:  config.RequestTimeout,
-		WriteTimeout: config.RequestTimeout,
-		IdleTimeout:  120 * time.Second,  // Close idle connections after 2 minutes
-		MaxHeaderBytes: 1 << 20,          // 1MB max header size
+		Addr:           config.Host + ":" + config.Port,
+		Handler:        router,
+		ReadTimeout:    config.RequestTimeout,
+		WriteTimeout:   config.RequestTimeout,
+		IdleTimeout:    120 * time.Second, // Close idle connections after 2 minutes
+		MaxHeaderBytes: 1 << 20,           // 1MB max header size
 	}
 
 	log.Fatal(server.ListenAndServe())
