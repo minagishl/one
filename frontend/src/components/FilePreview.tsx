@@ -93,8 +93,8 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata, password, a
 
 			// For large media files, handle password-protected files differently
 			if (isMediaFile && metadata.size > 5 * 1024 * 1024) {
-				if (metadata.has_download_password) {
-					// For password-protected media, use blob approach to ensure authentication
+				if (metadata.has_download_password && !adminToken) {
+					// For password-protected media without admin access, use blob approach to ensure authentication
 					const { blob } = await getFilePreviewWithProgress(
 						fileId,
 						(progress) => {
@@ -107,12 +107,27 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata, password, a
 					setPreviewUrl(url);
 				} else {
 					// For non-protected media, use direct streaming URL
-					let streamUrl = `/api/stream/${fileId}`;
-					const params = new URLSearchParams();
-					if (password) params.append('password', password);
-					if (adminToken) params.append('admin_token', adminToken);
-					if (params.toString()) streamUrl += `?${params.toString()}`;
-					setPreviewUrl(streamUrl);
+					// For admin access, use blob approach for security
+					if (adminToken) {
+						console.log('Admin token detected, using blob approach for streaming');
+						const { blob } = await getFilePreviewWithProgress(
+							fileId,
+							(progress) => {
+								setLoadingProgress(progress);
+							},
+							password,
+							adminToken
+						);
+						const url = URL.createObjectURL(blob);
+						setPreviewUrl(url);
+					} else {
+						let streamUrl = `/api/stream/${fileId}`;
+						const params = new URLSearchParams();
+						if (password) params.append('password', password);
+						if (params.toString()) streamUrl += `?${params.toString()}`;
+						console.log('Using streaming URL:', streamUrl);
+						setPreviewUrl(streamUrl);
+					}
 				}
 			} else if (isLargeFile) {
 				// For large non-media files, show progress and optimize loading
@@ -295,9 +310,17 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata, password, a
 		if (mime_type.startsWith('video/')) {
 			// For large video files, use optimized streaming endpoint
 			const isLargeVideo = metadata.size > 5 * 1024 * 1024; // 5MB threshold
-			const streamUrl = isLargeVideo 
-				? (password ? `/api/stream/${fileId}?password=${encodeURIComponent(password)}` : `/api/stream/${fileId}`)
-				: previewUrl;
+			let streamUrl = previewUrl;
+			
+			if (isLargeVideo) {
+				streamUrl = `/api/stream/${fileId}`;
+				const params = new URLSearchParams();
+				if (password) params.append('password', password);
+				if (adminToken) params.append('admin_token', adminToken);
+				if (params.toString()) streamUrl += `?${params.toString()}`;
+				console.log('Video streaming URL:', streamUrl);
+				console.log('Admin token present for video:', !!adminToken);
+			}
 
 			return (
 				<video
@@ -315,9 +338,17 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata, password, a
 		if (mime_type.startsWith('audio/')) {
 			// For large audio files, use optimized streaming endpoint
 			const isLargeAudio = metadata.size > 5 * 1024 * 1024; // 5MB threshold
-			const streamUrl = isLargeAudio 
-				? (password ? `/api/stream/${fileId}?password=${encodeURIComponent(password)}` : `/api/stream/${fileId}`)
-				: previewUrl;
+			let streamUrl = previewUrl;
+			
+			if (isLargeAudio) {
+				streamUrl = `/api/stream/${fileId}`;
+				const params = new URLSearchParams();
+				if (password) params.append('password', password);
+				if (adminToken) params.append('admin_token', adminToken);
+				if (params.toString()) streamUrl += `?${params.toString()}`;
+				console.log('Audio streaming URL:', streamUrl);
+				console.log('Admin token present for audio:', !!adminToken);
+			}
 
 			return (
 				<div className='flex justify-center'>
