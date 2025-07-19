@@ -180,7 +180,7 @@ const UploadArea: React.FC<UploadAreaProps> = ({ onUploadComplete }) => {
 								className='sr-only'
 							/>
 							<div
-								className={`w-11 h-6 transition-colors ${
+								className={`w-11 h-6 min-w-11 min-h-6 transition-colors ${
 									enablePasswordProtection ? 'bg-primary-500' : 'bg-gray-300'
 								}`}
 							>
