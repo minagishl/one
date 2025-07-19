@@ -69,18 +69,6 @@ func main() {
 	} else {
 		log.Printf("Database schema already exists")
 		
-		// Check if VARCHAR length migration is needed
-		migrationNeeded, err := database.CheckVarcharLengthMigrationNeeded()
-		if err != nil {
-			log.Fatal("Failed to check VARCHAR length migration status:", err)
-		}
-		
-		if migrationNeeded {
-			log.Printf("VARCHAR length migration needed, applying fix...")
-			if err := database.RunVarcharLengthMigration(); err != nil {
-				log.Fatal("Failed to run VARCHAR length migration:", err)
-			}
-		}
 	}
 
 	// Initialize services
