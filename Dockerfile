@@ -67,6 +67,9 @@ RUN chown -R appuser:appuser /app
 # Switch to non-root user
 USER appuser
 
+# Set environment variable for temp directory
+ENV TEMP_DIR=/app/temp
+
 # Expose port
 EXPOSE 8080
 
