@@ -157,11 +157,15 @@ export const getFileStatus = async (fileId: string): Promise<{
 
 export const getFilePreview = async (
 	fileId: string,
-	password?: string
+	password?: string,
+	adminToken?: string
 ): Promise<{ blob: Blob; contentType: string }> => {
 	const url = new URL(`/api/preview/${fileId}`, window.location.origin);
 	if (password) {
 		url.searchParams.append('password', password);
+	}
+	if (adminToken) {
+		url.searchParams.append('admin_token', adminToken);
 	}
 
 	const response = await fetch(url.toString());
@@ -181,11 +185,15 @@ export const getFilePreview = async (
 export const getFilePreviewWithProgress = async (
 	fileId: string,
 	onProgress: (progress: number) => void,
-	password?: string
+	password?: string,
+	adminToken?: string
 ): Promise<{ blob: Blob; contentType: string }> => {
 	const url = new URL(`/api/preview/${fileId}`, window.location.origin);
 	if (password) {
 		url.searchParams.append('password', password);
+	}
+	if (adminToken) {
+		url.searchParams.append('admin_token', adminToken);
 	}
 
 	const response = await fetch(url.toString());

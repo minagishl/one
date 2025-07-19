@@ -13,9 +13,10 @@ interface FilePreviewProps {
 	fileId: string;
 	metadata: FileMetadata;
 	password?: string;
+	adminToken?: string;
 }
 
-const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata, password }) => {
+const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata, password, adminToken }) => {
 	const [previewUrl, setPreviewUrl] = useState<string>('');
 	const [zipContents, setZipContents] = useState<ZipContents | null>(null);
 	const [activeTab, setActiveTab] = useState<'preview' | 'zip'>('preview');
@@ -99,13 +100,18 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata, password })
 						(progress) => {
 							setLoadingProgress(progress);
 						},
-						password
+						password,
+						adminToken
 					);
 					const url = URL.createObjectURL(blob);
 					setPreviewUrl(url);
 				} else {
 					// For non-protected media, use direct streaming URL
-					const streamUrl = password ? `/api/stream/${fileId}?password=${encodeURIComponent(password)}` : `/api/stream/${fileId}`;
+					let streamUrl = `/api/stream/${fileId}`;
+					const params = new URLSearchParams();
+					if (password) params.append('password', password);
+					if (adminToken) params.append('admin_token', adminToken);
+					if (params.toString()) streamUrl += `?${params.toString()}`;
 					setPreviewUrl(streamUrl);
 				}
 			} else if (isLargeFile) {
@@ -115,13 +121,14 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata, password })
 					(progress) => {
 						setLoadingProgress(progress);
 					},
-					password
+					password,
+					adminToken
 				);
 				const url = URL.createObjectURL(blob);
 				setPreviewUrl(url);
 			} else {
 				// For smaller files, use normal loading
-				const { blob } = await getFilePreview(fileId, password);
+				const { blob } = await getFilePreview(fileId, password, adminToken);
 				const url = URL.createObjectURL(blob);
 				setPreviewUrl(url);
 			}

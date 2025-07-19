@@ -305,7 +305,7 @@ curl -X DELETE "http://localhost:8080/api/admin/file/{file_id}" \
 
 ### Get File List
 ```bash
-curl -X GET "http://localhost:8080/api/admin/files" \
+curl -X POST "http://localhost:8080/api/admin/files" \
   -H "Content-Type: application/json" \
   -d '{
     "admin_password": "your_secure_admin_password"

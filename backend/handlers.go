@@ -13,6 +13,7 @@ import (
 	"math/big"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/klauspost/compress/zstd"
 	"github.com/pierrec/lz4/v4"
 	"golang.org/x/text/encoding/japanese"
@@ -525,10 +527,20 @@ func (s *FileService) getFile(c *gin.Context) {
 		return
 	}
 
-	// Check download password if required
+	// Check download password if required (bypass for admin)
 	if metadata.HasDownloadPassword {
 		providedPassword := c.Query("password")
-		if providedPassword != metadata.DownloadPassword {
+		adminToken := c.Query("admin_token")
+		
+		isAdminAccess := false
+		if adminToken != "" {
+			if _, err := s.validateAdminToken(adminToken); err == nil {
+				isAdminAccess = true
+				log.Printf("Admin access granted for file %s", fileID)
+			}
+		}
+		
+		if !isAdminAccess && providedPassword != metadata.DownloadPassword {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"error":   "Password required",
 				"message": "This file is password protected. Please provide the correct password.",
@@ -651,10 +663,20 @@ func (s *FileService) previewFile(c *gin.Context) {
 		return
 	}
 
-	// Check download password if required
+	// Check download password if required (bypass for admin)
 	if metadata.HasDownloadPassword {
 		providedPassword := c.Query("password")
-		if providedPassword != metadata.DownloadPassword {
+		adminToken := c.Query("admin_token")
+		
+		isAdminAccess := false
+		if adminToken != "" {
+			if _, err := s.validateAdminToken(adminToken); err == nil {
+				isAdminAccess = true
+				log.Printf("Admin access granted for file %s", fileID)
+			}
+		}
+		
+		if !isAdminAccess && providedPassword != metadata.DownloadPassword {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"error":   "Password required",
 				"message": "This file is password protected. Please provide the correct password.",
@@ -793,7 +815,17 @@ func (s *FileService) fastStreamFile(c *gin.Context) {
 	// Check download password if required
 	if metadata.HasDownloadPassword {
 		providedPassword := c.Query("password")
-		if providedPassword != metadata.DownloadPassword {
+		adminToken := c.Query("admin_token")
+		
+		isAdminAccess := false
+		if adminToken != "" {
+			if _, err := s.validateAdminToken(adminToken); err == nil {
+				isAdminAccess = true
+				log.Printf("Admin access granted for file %s", fileID)
+			}
+		}
+		
+		if !isAdminAccess && providedPassword != metadata.DownloadPassword {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"error":   "Password required",
 				"message": "This file is password protected. Please provide the correct password.",
@@ -1642,6 +1674,90 @@ type AdminRequest struct {
 	AdminPassword string `json:"admin_password"`
 }
 
+type AdminAuthResponse struct {
+	Token     string `json:"token"`
+	ExpiresAt int64  `json:"expires_at"`
+}
+
+type AdminClaims struct {
+	IsAdmin bool `json:"is_admin"`
+	jwt.RegisteredClaims
+}
+
+var jwtSecret = []byte("admin-jwt-secret-key-change-in-production")
+
+func (s *FileService) generateAdminToken() (string, int64, error) {
+	expirationTime := time.Now().Add(2 * time.Hour)
+	claims := &AdminClaims{
+		IsAdmin: true,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(expirationTime),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			Subject:   "admin",
+		},
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, err := token.SignedString(jwtSecret)
+	if err != nil {
+		return "", 0, err
+	}
+
+	return tokenString, expirationTime.Unix(), nil
+}
+
+func (s *FileService) validateAdminToken(tokenString string) (*AdminClaims, error) {
+	claims := &AdminClaims{}
+	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+		return jwtSecret, nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	if !token.Valid || !claims.IsAdmin {
+		return nil, fmt.Errorf("invalid admin token")
+	}
+
+	return claims, nil
+}
+
+func (s *FileService) adminAuth(c *gin.Context) {
+	var req AdminRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
+		return
+	}
+
+	if s.config.AdminPassword == "" {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error":   "Admin functionality not configured",
+			"message": "ADMIN_PASSWORD environment variable not set",
+		})
+		return
+	}
+
+	if req.AdminPassword != s.config.AdminPassword {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error":   "Invalid admin password",
+			"message": "The provided admin password is incorrect",
+		})
+		return
+	}
+
+	token, expiresAt, err := s.generateAdminToken()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
+		return
+	}
+
+	c.JSON(http.StatusOK, AdminAuthResponse{
+		Token:     token,
+		ExpiresAt: expiresAt,
+	})
+}
+
 func (s *FileService) updateFileExpiration(c *gin.Context) {
 	fileID := c.Param("id")
 	ctx := context.Background()
@@ -1732,7 +1848,7 @@ func (s *FileService) updateFileExpiration(c *gin.Context) {
 	})
 }
 
-func (s *FileService) deleteFile(c *gin.Context) {
+func (s *FileService) adminDeleteFile(c *gin.Context) {
 	fileID := c.Param("id")
 	ctx := context.Background()
 
@@ -1780,8 +1896,9 @@ func (s *FileService) deleteFile(c *gin.Context) {
 	pipe.Del(ctx, "content:"+fileID)
 	pipe.ZRem(ctx, "files", fileID)
 
-	// Delete from disk if stored there (large files)
-	if metadata.StorageType == "disk" {
+	// Delete from disk if stored there (large files > 100MB)
+	// Check if file size indicates disk storage
+	if metadata.Size > 100*1024*1024 {
 		filesDir := filepath.Join(s.config.TempDir, "files")
 		storagePath := filepath.Join(filesDir, fileID)
 		if err := os.Remove(storagePath); err != nil && !os.IsNotExist(err) {
@@ -1797,7 +1914,7 @@ func (s *FileService) deleteFile(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message": "File deleted successfully",
 		"file_id": fileID,
-		"filename": metadata.OriginalName,
+		"filename": metadata.Filename,
 	})
 }
 
@@ -1854,33 +1971,41 @@ func (s *FileService) getAdminFileList(c *gin.Context) {
 
 		// Get file size info
 		var fileSize int64
-		if metadata.StorageType == "disk" {
+		var storageType string
+		var compressed bool
+		
+		// Determine storage type based on file size
+		if metadata.Size > 100*1024*1024 {
+			storageType = "disk"
 			filesDir := filepath.Join(s.config.TempDir, "files")
 			storagePath := filepath.Join(filesDir, fileID)
 			if fileInfo, err := os.Stat(storagePath); err == nil {
 				fileSize = fileInfo.Size()
+			} else {
+				fileSize = metadata.Size
 			}
 		} else {
+			storageType = "redis"
 			// For Redis-stored files, get from content
 			content, err := s.redis.Get(ctx, "content:"+fileID).Bytes()
 			if err == nil {
-				if metadata.Compressed {
-					fileSize = int64(len(content)) // Compressed size
-				} else {
-					fileSize = int64(len(content))
-				}
+				fileSize = int64(len(content))
+				// Check if compressed based on compression type
+				compressed = metadata.Compression != "none"
+			} else {
+				fileSize = metadata.Size
 			}
 		}
 
 		files = append(files, map[string]interface{}{
 			"file_id":       fileID,
-			"filename":      metadata.OriginalName,
+			"filename":      metadata.Filename,
 			"size":          fileSize,
-			"original_size": metadata.OriginalSize,
-			"uploaded_at":   metadata.UploadedAt,
+			"original_size": metadata.Size,
+			"uploaded_at":   metadata.UploadTime,
 			"expires_at":    metadata.ExpiresAt,
-			"storage_type":  metadata.StorageType,
-			"compressed":    metadata.Compressed,
+			"storage_type":  storageType,
+			"compressed":    compressed,
 			"has_password":  metadata.DownloadPassword != "",
 		})
 	}

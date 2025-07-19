@@ -4,6 +4,7 @@ import HomePage from './pages/HomePage';
 import PreviewPage from './pages/PreviewPage';
 import TermsOfServicePage from './pages/TermsOfServicePage';
 import PrivacyPolicyPage from './pages/PrivacyPolicyPage';
+import AdminPage from './pages/AdminPage';
 
 const App: React.FC = () => {
 	return (
@@ -13,6 +14,7 @@ const App: React.FC = () => {
 				<Route path='/f/:fileId' element={<PreviewPage />} />
 				<Route path='/terms' element={<TermsOfServicePage />} />
 				<Route path='/privacy' element={<PrivacyPolicyPage />} />
+				<Route path='/admin' element={<AdminPage />} />
 			</Routes>
 		</Router>
 	);

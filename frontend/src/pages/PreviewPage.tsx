@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { AlertTriangle, ArrowLeft, Download, Trash2 } from 'lucide-react';
 import FilePreview from '../components/FilePreview';
 import { FileMetadata } from '../types';
@@ -9,6 +9,7 @@ import { formatSize, formatDate, formatCountdown } from '../utils/format';
 const PreviewPage: React.FC = () => {
 	const { fileId } = useParams<{ fileId: string }>();
 	const navigate = useNavigate();
+	const [searchParams] = useSearchParams();
 	const [metadata, setMetadata] = useState<FileMetadata | null>(null);
 	const [error, setError] = useState<string>('');
 	const [countdown, setCountdown] = useState<string>('');
@@ -23,12 +24,22 @@ const PreviewPage: React.FC = () => {
 	const [processingMessage, setProcessingMessage] = useState('');
 	const [pollInterval, setPollInterval] = useState<NodeJS.Timeout | null>(null);
 	const [pollTimeout, setPollTimeout] = useState<NodeJS.Timeout | null>(null);
+	const [adminToken, setAdminToken] = useState<string>('');
+	const [isAdminMode, setIsAdminMode] = useState(false);
 
 	useEffect(() => {
+		// Check for admin token in URL parameters
+		const token = searchParams.get('admin_token');
+		if (token) {
+			setAdminToken(token);
+			setIsAdminMode(true);
+			setIsPreviewAuthenticated(true); // Skip password prompt for admin
+		}
+		
 		if (fileId) {
 			loadFileMetadata();
 		}
-	}, [fileId]);
+	}, [fileId, searchParams]);
 
 	useEffect(() => {
 		if (metadata) {
@@ -181,7 +192,7 @@ const PreviewPage: React.FC = () => {
 		} else if (passwordDialogType === 'preview') {
 			try {
 				// Test the password by making a preview request
-				await getFilePreview(metadata.id, passwordInput);
+				await getFilePreview(metadata.id, passwordInput, adminToken);
 				// If successful, store password and show preview
 				setPreviewPassword(passwordInput);
 				setIsPreviewAuthenticated(true);
@@ -345,7 +356,7 @@ const PreviewPage: React.FC = () => {
 				</div>
 
 				{/* File Preview */}
-				{metadata.has_download_password && !isPreviewAuthenticated ? (
+				{metadata.has_download_password && !isPreviewAuthenticated && !isAdminMode ? (
 					<div className='card text-center py-12'>
 						<div className='w-16 h-16 bg-primary-100 mx-auto mb-6 flex items-center justify-center'>
 							<AlertTriangle className='w-8 h-8 text-primary-600' />
@@ -368,7 +379,8 @@ const PreviewPage: React.FC = () => {
 					<FilePreview
 						fileId={metadata.id}
 						metadata={metadata}
-						password={metadata.has_download_password ? previewPassword : undefined}
+						password={metadata.has_download_password && !isAdminMode ? previewPassword : undefined}
+						adminToken={isAdminMode ? adminToken : undefined}
 					/>
 				)}
 			</main>
