@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { Lock, Upload, Check, AlertTriangle, FileText, RefreshCw } from 'lucide-react';
+import { Lock, Upload, Check, AlertTriangle, FileText, RefreshCw, Archive } from 'lucide-react';
 import { uploadFile } from '../utils/api';
 import { ChunkUploader, shouldUseChunkUpload, formatUploadProgress } from '../utils/chunkUpload';
 import { formatSize } from '../utils/format';
@@ -25,6 +25,22 @@ const UploadArea: React.FC<UploadAreaProps> = ({ onUploadComplete }) => {
 	const [downloadPassword, setDownloadPassword] = useState('');
 	const [enablePasswordProtection, setEnablePasswordProtection] = useState(false);
 	const [uploadProgress, setUploadProgress] = useState<UploadProgress[]>([]);
+	const [enableBatchUpload, setEnableBatchUpload] = useState(false);
+
+	const createZipFile = async (files: File[]): Promise<File> => {
+		const JSZip = (await import('jszip')).default;
+		const zip = new JSZip();
+
+		files.forEach((file) => {
+			zip.file(file.name, file);
+		});
+
+		const zipBlob = await zip.generateAsync({ type: 'blob' });
+		const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+		const zipFileName = `files-${timestamp}.zip`;
+
+		return new File([zipBlob], zipFileName, { type: 'application/zip' });
+	};
 
 	const handleFiles = useCallback(
 		async (files: File[]) => {
@@ -39,6 +55,93 @@ const UploadArea: React.FC<UploadAreaProps> = ({ onUploadComplete }) => {
 			setUploadResults([]);
 			setUploadProgress([]);
 
+			// If batch upload is enabled and multiple files are selected, create a zip
+			if (enableBatchUpload && files.length > 1) {
+				try {
+					const zipFile = await createZipFile(files);
+
+					// Initialize progress for the zip file
+					const initialProgress: UploadProgress[] = [
+						{
+							filename: zipFile.name,
+							progress: 0,
+							isChunkUpload: shouldUseChunkUpload(zipFile),
+							retryCount: 0,
+						},
+					];
+					setUploadProgress(initialProgress);
+
+					const updateProgress = (progress: number) => {
+						setUploadProgress((prev) => prev.map((p) => ({ ...p, progress })));
+					};
+
+					const updateChunkProgress = (chunkIndex: number, totalChunks: number) => {
+						setUploadProgress((prev) =>
+							prev.map((p) => ({
+								...p,
+								chunkProgress: formatUploadProgress(chunkIndex, totalChunks, p.progress),
+							}))
+						);
+					};
+
+					const updateRetryCount = (chunkIndex: number, attempt: number) => {
+						setUploadProgress((prev) =>
+							prev.map((p) => ({
+								...p,
+								retryCount: attempt,
+								chunkProgress: `Retrying chunk ${chunkIndex} (attempt ${attempt})`,
+							}))
+						);
+					};
+
+					const updateError = (error: string) => {
+						setUploadProgress((prev) => prev.map((p) => ({ ...p, error })));
+					};
+
+					let result;
+					if (shouldUseChunkUpload(zipFile)) {
+						const chunkResult = await ChunkUploader.uploadFile({
+							file: zipFile,
+							downloadPassword: enablePasswordProtection ? downloadPassword : undefined,
+							onProgress: updateProgress,
+							onChunkProgress: updateChunkProgress,
+							onRetry: updateRetryCount,
+							onError: updateError,
+						});
+
+						result = {
+							success: chunkResult.success,
+							filename: zipFile.name,
+							fileId: chunkResult.fileId,
+							metadata: chunkResult.metadata,
+							delete_password: chunkResult.delete_password,
+							error: chunkResult.error,
+						};
+					} else {
+						updateProgress(50);
+						result = await uploadFile(
+							zipFile,
+							enablePasswordProtection ? downloadPassword : undefined
+						);
+						updateProgress(100);
+					}
+
+					setUploadResults([result]);
+					setIsUploading(false);
+
+					if (onUploadComplete) {
+						onUploadComplete([result]);
+					}
+					return;
+				} catch (error) {
+					console.error('Failed to create zip file:', error);
+					alert('Failed to create zip file. Please try uploading files individually.');
+					setIsUploading(false);
+					return;
+				}
+			}
+
+			// Normal individual file upload
 			// Initialize progress for all files
 			const initialProgress: UploadProgress[] = files.map((file) => ({
 				filename: file.name,
@@ -124,7 +227,7 @@ const UploadArea: React.FC<UploadAreaProps> = ({ onUploadComplete }) => {
 				onUploadComplete(results);
 			}
 		},
-		[enablePasswordProtection, downloadPassword, onUploadComplete]
+		[enablePasswordProtection, downloadPassword, enableBatchUpload, onUploadComplete]
 	);
 
 	const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -168,9 +271,42 @@ const UploadArea: React.FC<UploadAreaProps> = ({ onUploadComplete }) => {
 
 	return (
 		<div className='w-full max-w-4xl mx-auto'>
-			{/* Password Protection Settings */}
+			{/* Upload Settings */}
 			<div className='card p-6 mb-8'>
-				<div className='flex flex-col sm:flex-row sm:items-start gap-4'>
+				{/* Batch Upload Toggle */}
+				<div className='flex flex-col sm:flex-row sm:items-start gap-4 mb-6'>
+					<div className='flex items-center gap-3'>
+						<label className='relative inline-flex items-center cursor-pointer'>
+							<input
+								type='checkbox'
+								checked={enableBatchUpload}
+								onChange={(e) => setEnableBatchUpload(e.target.checked)}
+								className='sr-only'
+							/>
+							<div
+								className={`w-11 h-6 min-w-11 min-h-6 transition-colors ${
+									enableBatchUpload ? 'bg-primary-500' : 'bg-gray-300'
+								}`}
+							>
+								<div
+									className={`w-5 h-5 bg-white shadow-sm transform transition-transform ${
+										enableBatchUpload ? 'translate-x-5 ml-0.5' : 'translate-x-0.5'
+									} mt-0.5`}
+								></div>
+							</div>
+							<span className='ml-3 text-sm font-medium text-gray-900'>
+								Batch Upload (Combine Files)
+							</span>
+						</label>
+					</div>
+					<div className='flex items-center gap-2 text-sm text-gray-600'>
+						<Archive className='w-4 h-4' />
+						<span>Combine multiple files into a single ZIP archive</span>
+					</div>
+				</div>
+
+				{/* Password Protection Toggle */}
+				<div className='flex flex-col sm:flex-row sm:items-start gap-4 border-t border-gray-200 pt-6'>
 					<div className='flex items-center gap-3'>
 						<label className='relative inline-flex items-center cursor-pointer'>
 							<input
