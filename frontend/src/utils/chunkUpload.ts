@@ -94,6 +94,17 @@ export class ChunkUploader {
 			// Step 3: Complete upload
 			const result = await this.completeUpload(session.upload_id);
 
+			// If async processing, wait for completion to get delete_password
+			if (result.job_id && result.file_id) {
+				const fileStatus = await this.waitForProcessingCompletion(result.file_id);
+				return {
+					success: true,
+					fileId: result.file_id,
+					metadata: fileStatus.metadata,
+					delete_password: fileStatus.metadata?.delete_password,
+				};
+			}
+
 			return {
 				success: true,
 				fileId: result.file_id,
@@ -269,6 +280,33 @@ export class ChunkUploader {
 		}
 
 		return await response.json();
+	}
+
+	// Wait for file processing to complete and return final metadata with delete_password
+	private static async waitForProcessingCompletion(fileId: string): Promise<{
+		status: 'ready' | 'processing' | 'not_found' | 'error';
+		message: string;
+		metadata?: any;
+	}> {
+		const maxAttempts = 30; // 30 attempts with 2s delay = 1 minute max wait
+		const delayMs = 2000; // 2 seconds
+
+		for (let attempt = 0; attempt < maxAttempts; attempt++) {
+			const status = await this.getFileStatus(fileId);
+			
+			if (status.status === 'ready') {
+				return status;
+			}
+			
+			if (status.status === 'error' || status.status === 'not_found') {
+				throw new Error(`File processing failed: ${status.message}`);
+			}
+
+			// Wait before next attempt
+			await this.delay(delayMs);
+		}
+
+		throw new Error('File processing timeout - please check file status manually');
 	}
 }
 

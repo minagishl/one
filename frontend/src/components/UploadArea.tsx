@@ -348,15 +348,21 @@ const UploadArea: React.FC<UploadAreaProps> = ({ onUploadComplete }) => {
 												<div className='font-medium text-gray-900'>{result.filename}</div>
 												{result.metadata && (
 													<div className='text-gray-600 text-xs'>
-														{formatSize(result.metadata.size)} →{' '}
-														{formatSize(result.metadata.compressed_size)}
-														<span className='text-green-600 font-medium ml-2'>
-															(
-															{Math.round(
-																(1 - result.metadata.compressed_size / result.metadata.size) * 100
-															)}
-															% saved)
-														</span>
+														{formatSize(result.metadata.size)}
+														{result.metadata.compressed_size && result.metadata.compressed_size !== result.metadata.size && (
+															<>
+																{' → '}{formatSize(result.metadata.compressed_size)}
+																<span className='text-green-600 font-medium ml-2'>
+																	(
+																	{result.metadata.size > 0 && result.metadata.compressed_size >= 0
+																		? Math.round(
+																				(1 - result.metadata.compressed_size / result.metadata.size) * 100
+																		  )
+																		: 0}
+																	% saved)
+																</span>
+															</>
+														)}
 														{result.metadata.has_download_password && (
 															<span className='text-primary-500 font-medium ml-2 inline-flex items-center gap-1'>
 																<Lock className='w-4 h-4' />
