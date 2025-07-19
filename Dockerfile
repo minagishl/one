@@ -57,20 +57,19 @@ COPY --from=backend-builder /app/backend/main .
 # Copy built frontend from frontend builder
 COPY --from=frontend-builder /app/static ./static
 
-# Create temp directory for file uploads with proper permissions
-RUN mkdir -p /app/temp && \
-    mkdir -p /app/temp/files && \
-    chmod 775 /app/temp && \
-    chmod 775 /app/temp/files
-
 # Change ownership to non-root user
 RUN chown -R appuser:appuser /app
+
+# Create temp directory for file uploads in /tmp (world-writable)
+RUN mkdir -p /tmp/one-uploads && \
+    mkdir -p /tmp/one-uploads/files && \
+    chmod 777 /tmp/one-uploads
 
 # Switch to non-root user
 USER appuser
 
 # Set environment variable for temp directory
-ENV TEMP_DIR=/app/temp
+ENV TEMP_DIR=/tmp/one-uploads
 
 # Expose port
 EXPOSE 8080
