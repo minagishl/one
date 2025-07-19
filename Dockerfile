@@ -63,10 +63,13 @@ COPY --from=frontend-builder /app/static ./static
 # Create temp directory for file uploads in /app/temp (persistent) as root
 RUN mkdir -p /app/temp && \
     mkdir -p /app/temp/files && \
-    chmod 755 /app/temp
+    chmod 755 /app/temp && \
+    chmod 755 /app/temp/files
 
 # Change ownership to non-root user (including temp directory)
-RUN chown -R appuser:appuser /app
+RUN chown -R appuser:appuser /app && \
+    chmod 755 /app/temp && \
+    chmod 755 /app/temp/files
 
 # Switch to non-root user
 USER appuser

@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strconv"
 	"sync"
@@ -257,6 +258,21 @@ func (m *ChunkUploadManager) InitiateUpload(c *gin.Context) {
 		return
 	} else {
 		log.Printf("Parent directory %s exists, mode: %v", parentDir, stat.Mode())
+		
+		// Get current user info for debugging
+		if currentUser, err := user.Current(); err == nil {
+			log.Printf("Current user: %s (UID: %s, GID: %s)", currentUser.Username, currentUser.Uid, currentUser.Gid)
+		}
+		
+		// Test write permission by creating a test file
+		testFile := filepath.Join(parentDir, "test_write_permission")
+		if file, err := os.Create(testFile); err != nil {
+			log.Printf("Cannot write to parent directory %s: %v", parentDir, err)
+		} else {
+			file.Close()
+			os.Remove(testFile)
+			log.Printf("Write permission test successful for %s", parentDir)
+		}
 	}
 	
 	if err := os.MkdirAll(tempDir, 0755); err != nil {
