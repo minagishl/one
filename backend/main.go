@@ -105,6 +105,9 @@ func main() {
 		api.POST("/chunk/:upload_id/complete", service.chunkManager.CompleteUpload)
 		api.GET("/chunk/:upload_id/status", service.chunkManager.GetUploadStatus)
 		api.GET("/file/:id/status", service.getFileStatus)
+
+		// Admin endpoints
+		api.PUT("/admin/file/:id/expires", service.updateFileExpiration)
 	}
 
 	// Serve static files (React build) - AFTER API routes

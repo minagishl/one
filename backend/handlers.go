@@ -1482,3 +1482,98 @@ func readFileContent(file *os.File) []byte {
 	}
 	return content
 }
+
+type UpdateExpirationRequest struct {
+	AdminPassword string `json:"admin_password"`
+	ExpiresAt     string `json:"expires_at"`
+}
+
+func (s *FileService) updateFileExpiration(c *gin.Context) {
+	fileID := c.Param("id")
+	ctx := context.Background()
+
+	var req UpdateExpirationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
+		return
+	}
+
+	if s.config.AdminPassword == "" {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "Admin functionality not configured",
+			"message": "ADMIN_PASSWORD environment variable not set",
+		})
+		return
+	}
+
+	if req.AdminPassword != s.config.AdminPassword {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error": "Invalid admin password",
+			"message": "The provided admin password is incorrect",
+		})
+		return
+	}
+
+	expiresAt, err := time.Parse(time.RFC3339, req.ExpiresAt)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid expiration time format",
+			"message": "Please use RFC3339 format (e.g., 2023-12-31T23:59:59Z)",
+		})
+		return
+	}
+
+	metadataJSON, err := s.redis.Get(ctx, "file:"+fileID).Result()
+	if err == redis.Nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
+		return
+	} else if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get file metadata"})
+		return
+	}
+
+	var metadata FileMetadata
+	if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse file metadata"})
+		return
+	}
+
+	oldExpiresAt := metadata.ExpiresAt
+	metadata.ExpiresAt = expiresAt
+
+	updatedMetadataJSON, err := json.Marshal(metadata)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to serialize updated metadata"})
+		return
+	}
+
+	newExpiration := time.Until(expiresAt)
+	if newExpiration <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid expiration time",
+			"message": "Expiration time must be in the future",
+		})
+		return
+	}
+
+	pipe := s.redis.Pipeline()
+	pipe.Set(ctx, "file:"+fileID, updatedMetadataJSON, newExpiration)
+	pipe.Expire(ctx, "content:"+fileID, newExpiration)
+	pipe.ZAdd(ctx, "files", &redis.Z{
+		Score:  float64(expiresAt.Unix()),
+		Member: fileID,
+	})
+
+	if _, err := pipe.Exec(ctx); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update file expiration"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "File expiration updated successfully",
+		"file_id": fileID,
+		"old_expires_at": oldExpiresAt,
+		"new_expires_at": expiresAt,
+		"metadata": metadata,
+	})
+}

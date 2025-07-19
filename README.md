@@ -220,6 +220,64 @@ curl "http://localhost:8080/api/zip/{file_id}/extract?filename=path/to/file.txt"
 
 Extracts and previews a specific file from within a ZIP archive. Supports the same preview capabilities as regular files.
 
+## Admin Features
+
+### Update File Expiration
+
+Administrators can extend or modify file expiration times using a secure API endpoint.
+
+**Setup:**
+
+First, set the admin password as an environment variable:
+
+```bash
+export ADMIN_PASSWORD="your_secure_admin_password"
+```
+
+Or add it to your `compose.yml`:
+
+```yaml
+environment:
+  - ADMIN_PASSWORD=your_secure_admin_password
+```
+
+**API Usage:**
+
+```bash
+curl -X PUT "http://localhost:8080/api/admin/file/{file_id}/expires" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "admin_password": "your_secure_admin_password",
+    "expires_at": "2025-07-20T23:59:59Z"
+  }'
+```
+
+**Request Parameters:**
+- `admin_password`: Admin password (set via ADMIN_PASSWORD environment variable)
+- `expires_at`: New expiration time in RFC3339 format (must be in the future)
+
+**Response:**
+```json
+{
+  "message": "File expiration updated successfully",
+  "file_id": "8e0e8842-2aac-456c-b83a-192321b1e6ae",
+  "old_expires_at": "2025-07-19T12:00:00Z",
+  "new_expires_at": "2025-07-20T23:59:59Z",
+  "metadata": {
+    "id": "8e0e8842-2aac-456c-b83a-192321b1e6ae",
+    "filename": "example.txt",
+    "size": 1024,
+    "expires_at": "2025-07-20T23:59:59Z"
+  }
+}
+```
+
+**Security Features:**
+- Requires admin password authentication
+- Admin password must be set via environment variable
+- Only accepts future expiration times
+- Returns error if admin functionality is not configured
+
 ### File Access with UUID
 
 ```bash

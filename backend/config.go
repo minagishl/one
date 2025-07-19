@@ -38,6 +38,9 @@ type Config struct {
 	RedisPoolSize        int
 	RedisMaxIdleConns    int
 	RedisIdleTimeout     time.Duration
+
+	// Admin settings
+	AdminPassword string
 }
 
 func LoadConfig() *Config {
@@ -67,6 +70,8 @@ func LoadConfig() *Config {
 		RedisPoolSize:        getEnvInt("REDIS_POOL_SIZE", 100),        // Increased for high concurrency
 		RedisMaxIdleConns:    getEnvInt("REDIS_MAX_IDLE_CONNS", 20),
 		RedisIdleTimeout:     getEnvDuration("REDIS_IDLE_TIMEOUT", "5m"),
+
+		AdminPassword: getEnv("ADMIN_PASSWORD", ""),
 	}
 }
 
