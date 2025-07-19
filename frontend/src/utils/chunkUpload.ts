@@ -96,20 +96,42 @@ export class ChunkUploader {
 
 			// If async processing, wait for completion to get delete_password
 			if (result.job_id && result.file_id) {
-				const fileStatus = await this.waitForProcessingCompletion(result.file_id);
-				return {
-					success: true,
-					fileId: result.file_id,
-					metadata: fileStatus.metadata,
-					delete_password: fileStatus.metadata?.delete_password,
-				};
+				try {
+					const fileStatus = await this.waitForProcessingCompletion(result.file_id);
+
+					// Try multiple paths to get delete_password for robustness
+					const deletePassword =
+						fileStatus.metadata?.delete_password ||
+						fileStatus.delete_password ||
+						result.delete_password ||
+						result.metadata?.delete_password;
+
+					return {
+						success: true,
+						fileId: result.file_id,
+						metadata: fileStatus.metadata || result.metadata,
+						delete_password: deletePassword,
+					};
+				} catch {
+					// Fallback to immediate result if waiting fails
+					const deletePassword = result.delete_password || result.metadata?.delete_password;
+					return {
+						success: true,
+						fileId: result.file_id,
+						metadata: result.metadata,
+						delete_password: deletePassword,
+					};
+				}
 			}
+
+			// Handle immediate response (non-async)
+			const deletePassword = result.metadata?.delete_password || result.delete_password;
 
 			return {
 				success: true,
 				fileId: result.file_id,
 				metadata: result.metadata,
-				delete_password: result.metadata?.delete_password,
+				delete_password: deletePassword,
 			};
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
@@ -119,66 +141,6 @@ export class ChunkUploader {
 				error: errorMessage,
 			};
 		}
-	}
-
-	private static async calculateFileHash(file: File): Promise<string> {
-		try {
-			// For large files, we'll calculate hash in chunks to avoid memory issues
-			const chunkSize = 1024 * 1024; // 1MB chunks for hashing
-			const chunks = Math.ceil(file.size / chunkSize);
-
-			// Create a streaming hash using crypto.subtle
-			const hashBuffer = new ArrayBuffer(0);
-			let hash = await crypto.subtle.digest('SHA-256', hashBuffer); // Initialize empty hash
-
-			// Process file in chunks
-			for (let i = 0; i < chunks; i++) {
-				const start = i * chunkSize;
-				const end = Math.min(start + chunkSize, file.size);
-				const chunk = file.slice(start, end);
-
-				// Read chunk as ArrayBuffer
-				const chunkBuffer = await this.readChunkAsArrayBuffer(chunk);
-
-				// Update hash with chunk data
-				// Note: crypto.subtle doesn't support streaming, so we'll concatenate and hash at the end
-				if (i === 0) {
-					hash = await crypto.subtle.digest('SHA-256', chunkBuffer);
-				} else {
-					// For streaming hash, we need to combine previous hash with new chunk
-					// This is a simplified approach - in production, use a proper streaming hash library
-					const combined = new Uint8Array(hash.byteLength + chunkBuffer.byteLength);
-					combined.set(new Uint8Array(hash));
-					combined.set(new Uint8Array(chunkBuffer), hash.byteLength);
-					hash = await crypto.subtle.digest('SHA-256', combined);
-				}
-			}
-
-			const hashArray = Array.from(new Uint8Array(hash));
-			const hashHex = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
-			return hashHex;
-		} catch (error) {
-			console.error('Error calculating file hash:', error);
-			throw new Error(
-				'Failed to calculate file hash: ' +
-					(error instanceof Error ? error.message : 'Unknown error')
-			);
-		}
-	}
-
-	private static async readChunkAsArrayBuffer(chunk: Blob): Promise<ArrayBuffer> {
-		return new Promise((resolve, reject) => {
-			const reader = new FileReader();
-			reader.onload = (e) => {
-				if (e.target?.result instanceof ArrayBuffer) {
-					resolve(e.target.result);
-				} else {
-					reject(new Error('Failed to read chunk as ArrayBuffer'));
-				}
-			};
-			reader.onerror = () => reject(new Error('Failed to read chunk'));
-			reader.readAsArrayBuffer(chunk);
-		});
 	}
 
 	private static async initiateUpload(
@@ -240,17 +202,10 @@ export class ChunkUploader {
 
 		const result = await response.json();
 
-		// Handle async processing - return file_id immediately for status checking
+		// Handle async processing - return original result with job_id
 		if (result.job_id && result.file_id) {
-			// Start background processing but return immediately with file_id
-			// The frontend will use the status endpoint to check if file is ready
-			return {
-				file_id: result.file_id,
-				metadata: {
-					filename: 'Processing...',
-					processing: true,
-				},
-			};
+			// Return original result for async processing detection
+			return result;
 		}
 
 		// Handle legacy synchronous response
@@ -269,6 +224,7 @@ export class ChunkUploader {
 		preview_url?: string;
 		metadata?: any;
 		filename?: string;
+		delete_password?: string;
 	}> {
 		const response = await fetch(`/api/file/${fileId}/status`);
 
@@ -287,17 +243,18 @@ export class ChunkUploader {
 		status: 'ready' | 'processing' | 'not_found' | 'error';
 		message: string;
 		metadata?: any;
+		delete_password?: string;
 	}> {
 		const maxAttempts = 30; // 30 attempts with 2s delay = 1 minute max wait
 		const delayMs = 2000; // 2 seconds
 
 		for (let attempt = 0; attempt < maxAttempts; attempt++) {
 			const status = await this.getFileStatus(fileId);
-			
+
 			if (status.status === 'ready') {
 				return status;
 			}
-			
+
 			if (status.status === 'error' || status.status === 'not_found') {
 				throw new Error(`File processing failed: ${status.message}`);
 			}
