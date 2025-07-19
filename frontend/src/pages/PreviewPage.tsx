@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { AlertTriangle, ArrowLeft, Download, Trash2 } from 'lucide-react';
 import FilePreview from '../components/FilePreview';
 import { FileMetadata } from '../types';
-import { downloadFile, deleteFile, getFileMetadata, getFilePreview, getFileStatus } from '../utils/api';
+import { downloadFile, deleteFile, getFilePreview, getFileStatus } from '../utils/api';
 import { formatSize, formatDate, formatCountdown } from '../utils/format';
 
 const PreviewPage: React.FC = () => {
@@ -13,12 +13,16 @@ const PreviewPage: React.FC = () => {
 	const [error, setError] = useState<string>('');
 	const [countdown, setCountdown] = useState<string>('');
 	const [showPasswordDialog, setShowPasswordDialog] = useState(false);
-	const [passwordDialogType, setPasswordDialogType] = useState<'download' | 'delete' | 'preview'>('download');
+	const [passwordDialogType, setPasswordDialogType] = useState<'download' | 'delete' | 'preview'>(
+		'download'
+	);
 	const [passwordInput, setPasswordInput] = useState('');
 	const [previewPassword, setPreviewPassword] = useState<string>('');
 	const [isPreviewAuthenticated, setIsPreviewAuthenticated] = useState(false);
 	const [isProcessing, setIsProcessing] = useState(false);
 	const [processingMessage, setProcessingMessage] = useState('');
+	const [pollInterval, setPollInterval] = useState<NodeJS.Timeout | null>(null);
+	const [pollTimeout, setPollTimeout] = useState<NodeJS.Timeout | null>(null);
 
 	useEffect(() => {
 		if (fileId) {
@@ -35,42 +39,79 @@ const PreviewPage: React.FC = () => {
 		}
 	}, [metadata]);
 
+	// Cleanup polling on unmount
+	useEffect(() => {
+		return () => {
+			if (pollInterval) {
+				clearInterval(pollInterval);
+			}
+			if (pollTimeout) {
+				clearTimeout(pollTimeout);
+			}
+		};
+	}, [pollInterval, pollTimeout]);
+
 	const loadFileMetadata = async () => {
 		if (!fileId) return;
 
 		try {
 			// First check file status
 			const status = await getFileStatus(fileId);
-			
+
 			if (status.status === 'processing') {
 				setIsProcessing(true);
 				setProcessingMessage(status.message);
 				setError('');
 				setMetadata(null);
-				
+
+				// Clear any existing polling
+				if (pollInterval) {
+					clearInterval(pollInterval);
+				}
+				if (pollTimeout) {
+					clearTimeout(pollTimeout);
+				}
+
 				// Set up polling to check when processing is complete
-				const pollInterval = setInterval(async () => {
+				const newPollInterval = setInterval(async () => {
 					try {
 						const updatedStatus = await getFileStatus(fileId);
 						if (updatedStatus.status === 'ready' && updatedStatus.metadata) {
 							setIsProcessing(false);
 							setProcessingMessage('');
 							setMetadata(updatedStatus.metadata);
-							clearInterval(pollInterval);
+							if (pollInterval) clearInterval(pollInterval);
+							if (pollTimeout) clearTimeout(pollTimeout);
+							setPollInterval(null);
+							setPollTimeout(null);
 						} else if (updatedStatus.status === 'error' || updatedStatus.status === 'not_found') {
 							setIsProcessing(false);
 							setProcessingMessage('');
 							setError(updatedStatus.message);
-							clearInterval(pollInterval);
+							if (pollInterval) clearInterval(pollInterval);
+							if (pollTimeout) clearTimeout(pollTimeout);
+							setPollInterval(null);
+							setPollTimeout(null);
 						}
 					} catch (err) {
 						console.error('Error polling file status:', err);
+						// Don't stop polling on network errors, continue trying
 					}
-				}, 3000); // Poll every 3 seconds
-				
+				}, 5000); // Poll every 5 seconds
+
+				setPollInterval(newPollInterval);
+
 				// Clear interval after 5 minutes to avoid infinite polling
-				setTimeout(() => clearInterval(pollInterval), 5 * 60 * 1000);
-				
+				const newPollTimeout = setTimeout(() => {
+					if (pollInterval) {
+						clearInterval(pollInterval);
+						setPollInterval(null);
+					}
+					setIsProcessing(false);
+					setError('File processing timed out. Please try refreshing the page.');
+				}, 5 * 60 * 1000);
+
+				setPollTimeout(newPollTimeout);
 			} else if (status.status === 'ready' && status.metadata) {
 				setIsProcessing(false);
 				setProcessingMessage('');
@@ -81,7 +122,7 @@ const PreviewPage: React.FC = () => {
 				setProcessingMessage('');
 				setError(status.message);
 			}
-			
+
 			// Reset preview authentication when metadata changes
 			setIsPreviewAuthenticated(false);
 			setPreviewPassword('');
@@ -309,9 +350,12 @@ const PreviewPage: React.FC = () => {
 						<div className='w-16 h-16 bg-primary-100 mx-auto mb-6 flex items-center justify-center'>
 							<AlertTriangle className='w-8 h-8 text-primary-600' />
 						</div>
-						<h3 className='text-xl font-medium text-gray-900 mb-4'>This file is password protected</h3>
+						<h3 className='text-xl font-medium text-gray-900 mb-4'>
+							This file is password protected
+						</h3>
 						<p className='text-gray-600 mb-8 max-w-md mx-auto'>
-							A password is required to preview this file. Click the button below to enter the password.
+							A password is required to preview this file. Click the button below to enter the
+							password.
 						</p>
 						<button
 							onClick={handleShowPreview}
@@ -321,9 +365,9 @@ const PreviewPage: React.FC = () => {
 						</button>
 					</div>
 				) : (
-					<FilePreview 
-						fileId={metadata.id} 
-						metadata={metadata} 
+					<FilePreview
+						fileId={metadata.id}
+						metadata={metadata}
 						password={metadata.has_download_password ? previewPassword : undefined}
 					/>
 				)}
@@ -377,10 +421,10 @@ const PreviewPage: React.FC = () => {
 									disabled={!passwordInput}
 									className='btn-primary flex-1 disabled:bg-gray-300 disabled:cursor-not-allowed'
 								>
-									{passwordDialogType === 'download' 
-										? 'Download' 
-										: passwordDialogType === 'delete' 
-										? 'Delete' 
+									{passwordDialogType === 'download'
+										? 'Download'
+										: passwordDialogType === 'delete'
+										? 'Delete'
 										: 'Show Preview'}
 								</button>
 							</div>

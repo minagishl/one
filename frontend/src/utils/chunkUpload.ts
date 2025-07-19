@@ -228,7 +228,7 @@ export class ChunkUploader {
 		}
 
 		const result = await response.json();
-		
+
 		// Handle async processing - return file_id immediately for status checking
 		if (result.job_id && result.file_id) {
 			// Start background processing but return immediately with file_id
@@ -238,28 +238,16 @@ export class ChunkUploader {
 				metadata: {
 					filename: 'Processing...',
 					processing: true,
-				}
+				},
 			};
 		}
-		
+
 		// Handle legacy synchronous response
 		return result;
 	}
 
-
 	private static delay(ms: number): Promise<void> {
 		return new Promise((resolve) => setTimeout(resolve, ms));
-	}
-
-	public static async getUploadStatus(uploadId: string): Promise<any> {
-		const response = await fetch(`/api/chunk/${uploadId}/status`);
-
-		if (!response.ok) {
-			const error = await response.json();
-			throw new Error(error.error || 'Failed to get upload status');
-		}
-
-		return await response.json();
 	}
 
 	// Check if a file is ready for download or still processing
@@ -272,11 +260,11 @@ export class ChunkUploader {
 		filename?: string;
 	}> {
 		const response = await fetch(`/api/file/${fileId}/status`);
-		
+
 		if (!response.ok) {
 			return {
 				status: 'error',
-				message: 'Failed to check file status'
+				message: 'Failed to check file status',
 			};
 		}
 

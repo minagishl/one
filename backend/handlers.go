@@ -101,6 +101,21 @@ func (s *FileService) getFileStatus(c *gin.Context) {
 					"estimated_time": "A few moments",
 				})
 				return
+			} else if status == "completed" {
+				// File processing is completed, remove processing status and continue to check file availability
+				s.redis.Del(ctx, "processing:"+fileID)
+			} else if status == "failed" {
+				// File processing failed, return detailed error information
+				errorMsg := "File processing failed. Please try uploading again."
+				if errorDetail, exists := processingStatus["error"].(string); exists {
+					errorMsg = errorDetail
+				}
+				c.JSON(http.StatusBadRequest, gin.H{
+					"status": "failed",
+					"message": errorMsg,
+					"error_type": "processing_failed",
+				})
+				return
 			}
 		}
 	}
@@ -629,16 +644,11 @@ func (s *FileService) previewFile(c *gin.Context) {
 
 // fastStreamFile provides optimized streaming for large media files
 func (s *FileService) fastStreamFile(c *gin.Context) {
-	// Acquire download semaphore for streaming
-	if err := s.downloadSem.Acquire(c.Request.Context(), 1); err != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"error": "Server busy, please try again later",
-		})
-		return
-	}
-	defer s.downloadSem.Release(1)
+	// Note: No semaphore acquisition for streaming to allow unlimited concurrent streams
+	// Streaming is bandwidth-limited rather than CPU/memory intensive
 
 	fileID := c.Param("id")
+	log.Printf("fastStreamFile called for fileID: %s", fileID)
 	ctx := context.Background()
 
 	// Get metadata
@@ -707,12 +717,15 @@ func (s *FileService) fastStreamFile(c *gin.Context) {
 
 // streamMediaContent provides optimized streaming for media files
 func (s *FileService) streamMediaContent(c *gin.Context, compressedContent string, metadata FileMetadata) {
+	log.Printf("streamMediaContent: content prefix check, length=%d", len(compressedContent))
 	if strings.HasPrefix(compressedContent, "DISK:") {
 		// Stream directly from disk for best performance
 		diskPath := strings.TrimPrefix(compressedContent, "DISK:")
+		log.Printf("Streaming from disk: %s", diskPath)
 		s.streamMediaFromDisk(c, diskPath, metadata)
 	} else {
 		// Stream from Redis
+		log.Printf("Streaming from Redis, content length: %d bytes", len(compressedContent))
 		s.streamMediaFromRedis(c, compressedContent, metadata)
 	}
 }
@@ -721,9 +734,15 @@ func (s *FileService) streamMediaContent(c *gin.Context, compressedContent strin
 func (s *FileService) streamMediaFromDisk(c *gin.Context, diskPath string, metadata FileMetadata) {
 	// Open file directly for uncompressed files (media files are typically uncompressed)
 	if metadata.Compression == CompressionNone {
+		log.Printf("Attempting to open file at path: %s", diskPath)
 		file, err := os.Open(diskPath)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to open file"})
+			log.Printf("Failed to open file at path %s: %v", diskPath, err)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "Failed to open file",
+				"path":  diskPath,
+				"details": err.Error(),
+			})
 			return
 		}
 		defer file.Close()
@@ -752,11 +771,16 @@ func (s *FileService) streamMediaFromRedis(c *gin.Context, compressedContent str
 	var content []byte
 	var err error
 
+	log.Printf("streamMediaFromRedis: compression=%s, content_length=%d", metadata.Compression, len(compressedContent))
+	
 	if metadata.Compression == CompressionNone {
+		log.Printf("No compression, using content directly")
 		content = []byte(compressedContent)
 	} else {
+		log.Printf("Decompressing content with %s", metadata.Compression)
 		content, err = s.compressor.Decompress([]byte(compressedContent), metadata.Compression)
 		if err != nil {
+			log.Printf("Failed to decompress file: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decompress file"})
 			return
 		}
@@ -1218,9 +1242,15 @@ func (s *FileService) streamFileContent(c *gin.Context, compressedContent string
 // streamFromDisk streams file content from disk with compression support
 func (s *FileService) streamFromDisk(c *gin.Context, diskPath string, metadata FileMetadata) {
 	// Open compressed file
+	log.Printf("Opening file from disk: %s", diskPath)
 	file, err := os.Open(diskPath)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to open file from disk"})
+		log.Printf("Failed to open file from disk %s: %v", diskPath, err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to open file from disk",
+			"path":  diskPath,
+			"details": err.Error(),
+		})
 		return
 	}
 	defer file.Close()

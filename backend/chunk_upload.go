@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -463,6 +464,9 @@ func (m *ChunkUploadManager) CompleteUpload(c *gin.Context) {
 }
 
 func (m *ChunkUploadManager) processFileInBackground(job *ProcessingJob, upload *ChunkUpload, fs *FileService) {
+	ctx := context.Background()
+	log.Printf("Starting background processing for file ID: %s, filename: %s", job.FileID, upload.Filename)
+	
 	// Update job status to processing
 	job.Status = "processing"
 	job.Progress = 10
@@ -470,12 +474,22 @@ func (m *ChunkUploadManager) processFileInBackground(job *ProcessingJob, upload 
 	m.updateJob(job)
 
 	// Assemble file from chunks with streaming approach
+	log.Printf("Assembling file from chunks for file ID: %s", job.FileID)
 	assembledFile, err := m.assembleFileStreaming(upload, job.FileID)
 	if err != nil {
+		log.Printf("Failed to assemble file %s: %v", job.FileID, err)
 		job.Status = "failed"
 		job.Error = "Failed to assemble file: " + err.Error()
 		job.UpdatedAt = time.Now()
 		m.updateJob(job)
+		// Store failed status in Redis instead of deleting
+		errorStatus := map[string]interface{}{
+			"status":    "failed",
+			"error":     job.Error,
+			"timestamp": time.Now().Unix(),
+		}
+		errorJSON, _ := json.Marshal(errorStatus)
+		fs.redis.Set(ctx, "processing:"+job.FileID, string(errorJSON), time.Hour*24)
 		return
 	}
 	defer assembledFile.Close()
@@ -492,16 +506,22 @@ func (m *ChunkUploadManager) processFileInBackground(job *ProcessingJob, upload 
 		job.Error = "Failed to get file info: " + err.Error()
 		job.UpdatedAt = time.Now()
 		m.updateJob(job)
+		// Clean up processing status on failure
+		fs.redis.Del(ctx, "processing:"+job.FileID)
 		return
 	}
 
 	// Store file with streaming approach
+	log.Printf("Storing assembled file for file ID: %s", job.FileID)
 	result, err := m.storeAssembledFileStreaming(fs, job.FileID, upload.Filename, assembledFile, upload.DownloadPassword)
 	if err != nil {
+		log.Printf("Failed to store file %s: %v", job.FileID, err)
 		job.Status = "failed"
 		job.Error = "Failed to store file: " + err.Error()
 		job.UpdatedAt = time.Now()
 		m.updateJob(job)
+		// Clean up processing status on failure
+		fs.redis.Del(ctx, "processing:"+job.FileID)
 		return
 	}
 
@@ -533,13 +553,9 @@ func (m *ChunkUploadManager) processFileInBackground(job *ProcessingJob, upload 
 	job.UpdatedAt = time.Now()
 	m.updateJob(job)
 	
-	// Store processing status in Redis for file status endpoint
-	ctx := context.Background()
-	statusJSON, _ := json.Marshal(map[string]interface{}{
-		"status": "completed",
-		"file_id": job.FileID,
-	})
-	fs.redis.Set(ctx, "processing:"+job.FileID, statusJSON, 1*time.Hour)
+	// Only clean up processing status on successful completion
+	log.Printf("Successfully completed background processing for file ID: %s", job.FileID)
+	fs.redis.Del(ctx, "processing:"+job.FileID)
 }
 
 func (m *ChunkUploadManager) updateJob(job *ProcessingJob) {

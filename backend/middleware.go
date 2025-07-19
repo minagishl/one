@@ -105,6 +105,12 @@ func rateLimitMiddleware(_ *Config) gin.HandlerFunc {
 		ip := c.ClientIP()
 		now := time.Now()
 
+		// Skip rate limiting for streaming endpoints to allow unlimited concurrent streams
+		if strings.HasPrefix(c.Request.URL.Path, "/api/stream/") {
+			c.Next()
+			return
+		}
+
 		mu.Lock()
 		defer mu.Unlock()
 

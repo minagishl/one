@@ -146,8 +146,8 @@ func main() {
 	server := &http.Server{
 		Addr:           config.Host + ":" + config.Port,
 		Handler:        router,
-		ReadTimeout:    config.RequestTimeout,
-		WriteTimeout:   config.RequestTimeout,
+		ReadTimeout:    0,  // No read timeout for streaming support
+		WriteTimeout:   0,  // No write timeout for streaming support
 		IdleTimeout:    120 * time.Second, // Close idle connections after 2 minutes
 		MaxHeaderBytes: 1 << 20,           // 1MB max header size
 	}
