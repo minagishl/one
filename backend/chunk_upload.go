@@ -243,7 +243,9 @@ func (m *ChunkUploadManager) InitiateUpload(c *gin.Context) {
 
 	// Create temp directory for chunks
 	tempDir := filepath.Join(m.config.TempDir, uploadID)
+	log.Printf("Creating temp directory: %s", tempDir)
 	if err := os.MkdirAll(tempDir, 0755); err != nil {
+		log.Printf("Failed to create temp directory %s: %v", tempDir, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create temp directory"})
 		return
 	}

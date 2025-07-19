@@ -57,9 +57,11 @@ COPY --from=backend-builder /app/backend/main .
 # Copy built frontend from frontend builder
 COPY --from=frontend-builder /app/static ./static
 
-# Create temp directory for file uploads
+# Create temp directory for file uploads with proper permissions
 RUN mkdir -p /app/temp && \
-    mkdir -p /app/temp/files
+    mkdir -p /app/temp/files && \
+    chmod 755 /app/temp && \
+    chmod 755 /app/temp/files
 
 # Change ownership to non-root user
 RUN chown -R appuser:appuser /app
