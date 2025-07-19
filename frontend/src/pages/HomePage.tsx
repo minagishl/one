@@ -5,9 +5,9 @@ import { CloudUpload, GalleryVerticalEnd, Clock4, LockKeyhole, Eye } from 'lucid
 
 const HomePage: React.FC = () => {
 	return (
-		<div className='min-h-screen bg-gray-25'>
+		<div className='min-h-screen bg-gray-25 flex flex-col'>
 			{/* Main Content */}
-			<main className='max-w-6xl mx-auto px-6 py-12'>
+			<main className='max-w-6xl mx-auto px-6 py-12 flex-1'>
 				{/* Hero Section */}
 				<div className='text-center mb-16'>
 					<div className='w-16 h-16 bg-primary-500 mx-auto mb-8 flex items-center justify-center'>
