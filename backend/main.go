@@ -17,6 +17,7 @@ import (
 
 type FileService struct {
 	redis        *redis.Client
+	db           *Database
 	compressor   *CompressionManager
 	config       *Config
 	chunkManager *ChunkUploadManager
@@ -48,12 +49,35 @@ func main() {
 		log.Fatal("Failed to connect to Redis:", err)
 	}
 
+	// Initialize PostgreSQL database
+	database, err := NewDatabase(config)
+	if err != nil {
+		log.Fatal("Failed to initialize database:", err)
+	}
+	defer database.Close()
+
+	// Check if schema exists and run migrations if needed
+	schemaExists, err := database.CheckSchemaExists()
+	if err != nil {
+		log.Fatal("Failed to check schema existence:", err)
+	}
+
+	if !schemaExists {
+		log.Printf("Database schema not found, running migrations...")
+		if err := database.RunMigrations(); err != nil {
+			log.Fatal("Failed to run database migrations:", err)
+		}
+	} else {
+		log.Printf("Database schema already exists")
+	}
+
 	// Initialize services
 	compressor := NewCompressionManager()
 	chunkManager := NewChunkUploadManager(redisClient, config)
 
 	service := &FileService{
 		redis:        redisClient,
+		db:           database,
 		compressor:   compressor,
 		config:       config,
 		chunkManager: chunkManager,
@@ -61,8 +85,9 @@ func main() {
 		downloadSem:  semaphore.NewWeighted(100), // 100 concurrent downloads
 	}
 
-	// Start expired file cleanup goroutine
+	// Start expired file cleanup goroutines
 	go service.startExpiredFileCleanup()
+	go service.startDatabaseCleanup()
 
 	// Setup Gin router with optimizations
 	gin.SetMode(gin.DebugMode)
@@ -172,6 +197,17 @@ func (s *FileService) startExpiredFileCleanup() {
 
 	for range ticker.C {
 		s.cleanupExpiredFiles()
+	}
+}
+
+func (s *FileService) startDatabaseCleanup() {
+	ticker := time.NewTicker(1 * time.Hour) // Check every hour
+	defer ticker.Stop()
+
+	for range ticker.C {
+		if err := s.db.CleanupExpiredData(); err != nil {
+			log.Printf("Error during database cleanup: %v", err)
+		}
 	}
 }
 

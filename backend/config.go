@@ -16,6 +16,17 @@ type Config struct {
 	RedisPassword string
 	RedisDB       int
 
+	// PostgreSQL configuration
+	DatabaseURL      string
+	DatabaseHost     string
+	DatabasePort     string
+	DatabaseUser     string
+	DatabasePassword string
+	DatabaseName     string
+	DatabaseSSLMode  string
+	DatabaseMaxConns int
+	DatabaseMinConns int
+
 	// File storage
 	MaxFileSize       int64
 	MaxFilesPerUser   int
@@ -51,6 +62,16 @@ func LoadConfig() *Config {
 		RedisAddr:     getEnv("REDIS_ADDR", "localhost:6379"),
 		RedisPassword: getEnv("REDIS_PASSWORD", ""),
 		RedisDB:       getEnvInt("REDIS_DB", 0),
+
+		DatabaseURL:      getEnv("DATABASE_URL", ""),
+		DatabaseHost:     getEnv("DB_HOST", "localhost"),
+		DatabasePort:     getEnv("DB_PORT", "5432"),
+		DatabaseUser:     getEnv("DB_USER", "postgres"),
+		DatabasePassword: getEnv("DB_PASSWORD", ""),
+		DatabaseName:     getEnv("DB_NAME", "file_sharing"),
+		DatabaseSSLMode:  getEnv("DB_SSLMODE", "disable"),
+		DatabaseMaxConns: getEnvInt("DB_MAX_CONNS", 20),
+		DatabaseMinConns: getEnvInt("DB_MIN_CONNS", 5),
 
 		MaxFileSize:       getEnvInt64("MAX_FILE_SIZE", 10*1024*1024*1024), // 10GB
 		MaxFilesPerUser:   getEnvInt("MAX_FILES_PER_USER", 1000),

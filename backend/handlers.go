@@ -120,39 +120,92 @@ func (s *FileService) getFileStatus(c *gin.Context) {
 		}
 	}
 
-	// Check if file exists in metadata
-	metadataJSON, err := s.redis.Get(ctx, "file:"+fileID).Result()
-	if err == redis.Nil {
+	// Check if file exists in PostgreSQL first
+	fileStorage, dbErr := s.db.GetFile(fileID)
+	var metadata FileMetadata
+	var fileFound bool
+
+	if dbErr != nil {
+		log.Printf("Failed to get file from database: %v", dbErr)
+	}
+
+	if fileStorage != nil {
+		// File found in database
+		fileFound = true
+		metadata = FileMetadata{
+			ID:                  fileStorage.ID,
+			Filename:           fileStorage.Filename,
+			Size:               fileStorage.OriginalSize,
+			CompressedSize:     0,
+			MimeType:           fileStorage.MimeType,
+			Compression:        CompressionType(fileStorage.CompressionType),
+			UploadTime:         fileStorage.UploadTime,
+			ExpiresAt:          fileStorage.ExpiresAt,
+			DeletePassword:     fileStorage.DeletePassword,
+			DownloadPassword:   "",
+			HasDownloadPassword: fileStorage.HasDownloadPassword,
+		}
+		
+		if fileStorage.CompressedSize != nil {
+			metadata.CompressedSize = *fileStorage.CompressedSize
+		}
+		
+		if fileStorage.DownloadPassword != nil {
+			metadata.DownloadPassword = *fileStorage.DownloadPassword
+		}
+	} else {
+		// Fallback to Redis
+		metadataJSON, err := s.redis.Get(ctx, "file:"+fileID).Result()
+		if err == redis.Nil {
+			c.JSON(http.StatusNotFound, gin.H{
+				"status": "not_found",
+				"message": "File not found or may still be processing"})
+			return
+		} else if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"status": "error",
+				"message": "Failed to check file status"})
+			return
+		}
+
+		// File exists in Redis, parse metadata
+		if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"status": "error",
+				"message": "Failed to parse file metadata"})
+			return
+		}
+		fileFound = true
+	}
+
+	if !fileFound {
 		c.JSON(http.StatusNotFound, gin.H{
 			"status": "not_found",
 			"message": "File not found or may still be processing"})
 		return
-	} else if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"status": "error",
-			"message": "Failed to check file status"})
-		return
-	}
-
-	// File exists, parse metadata
-	var metadata FileMetadata
-	if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"status": "error",
-			"message": "Failed to parse file metadata"})
-		return
 	}
 
 	// Check if file content is available
-	contentExists, err := s.redis.Exists(ctx, "content:"+fileID).Result()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"status": "error",
-			"message": "Failed to check file content availability"})
-		return
+	var contentAvailable bool
+	
+	// If file is stored on disk, check file existence
+	if fileStorage != nil && fileStorage.StorageType == "disk" && fileStorage.StoragePath != nil {
+		if _, err := os.Stat(*fileStorage.StoragePath); err == nil {
+			contentAvailable = true
+		}
+	} else {
+		// Check Redis for content
+		contentExists, err := s.redis.Exists(ctx, "content:"+fileID).Result()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"status": "error",
+				"message": "Failed to check file content availability"})
+			return
+		}
+		contentAvailable = contentExists > 0
 	}
 
-	if contentExists > 0 {
+	if contentAvailable {
 		// File is ready, remove processing status
 		s.redis.Del(ctx, "processing:"+fileID)
 		
@@ -342,7 +395,33 @@ func (s *FileService) uploadFile(c *gin.Context) {
 		return
 	}
 
-	// Store metadata with 24-hour expiration
+	// Store metadata in PostgreSQL
+	fileStorage := &FileStorage{
+		ID:                  fileID,
+		Filename:           header.Filename,
+		OriginalSize:       header.Size,
+		CompressedSize:     &metadata.CompressedSize,
+		MimeType:           detectedMimeType,
+		CompressionType:    string(compressionType),
+		StorageType:        "redis",
+		StoragePath:        nil,
+		UploadTime:         now,
+		ExpiresAt:          expiresAt,
+		DeletePassword:     deletePassword,
+		DownloadPassword:   nil,
+		HasDownloadPassword: hasDownloadPassword,
+	}
+
+	if hasDownloadPassword {
+		fileStorage.DownloadPassword = &downloadPassword
+	}
+
+	if err := s.db.SaveFile(fileStorage); err != nil {
+		log.Printf("Failed to save file metadata to database: %v", err)
+		// Continue with Redis storage for backward compatibility
+	}
+
+	// Store metadata in Redis with 24-hour expiration (for backward compatibility)
 	metadataJSON, err := json.Marshal(metadata)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to serialize metadata"})
@@ -386,17 +465,58 @@ func (s *FileService) getFile(c *gin.Context) {
 	fileID := c.Param("id")
 	ctx := context.Background()
 
-	// Get metadata
-	metadataJSON, err := s.redis.Get(ctx, "file:"+fileID).Result()
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
-		return
-	}
-
+	// Try to get metadata from PostgreSQL first
+	fileStorage, err := s.db.GetFile(fileID)
 	var metadata FileMetadata
-	if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse metadata"})
-		return
+	
+	if err != nil {
+		log.Printf("Failed to get file from database: %v", err)
+		// Fallback to Redis
+		metadataJSON, err := s.redis.Get(ctx, "file:"+fileID).Result()
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
+			return
+		}
+
+		if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse metadata"})
+			return
+		}
+	} else if fileStorage == nil {
+		// File not found in database, try Redis
+		metadataJSON, err := s.redis.Get(ctx, "file:"+fileID).Result()
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
+			return
+		}
+
+		if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse metadata"})
+			return
+		}
+	} else {
+		// Convert database record to metadata
+		metadata = FileMetadata{
+			ID:                  fileStorage.ID,
+			Filename:           fileStorage.Filename,
+			Size:               fileStorage.OriginalSize,
+			CompressedSize:     0,
+			MimeType:           fileStorage.MimeType,
+			Compression:        CompressionType(fileStorage.CompressionType),
+			UploadTime:         fileStorage.UploadTime,
+			ExpiresAt:          fileStorage.ExpiresAt,
+			DeletePassword:     fileStorage.DeletePassword,
+			DownloadPassword:   "",
+			HasDownloadPassword: fileStorage.HasDownloadPassword,
+		}
+		
+		if fileStorage.CompressedSize != nil {
+			metadata.CompressedSize = *fileStorage.CompressedSize
+		}
+		
+		if fileStorage.DownloadPassword != nil {
+			metadata.DownloadPassword = *fileStorage.DownloadPassword
+		}
 	}
 
 	// Check if file has expired

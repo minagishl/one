@@ -675,7 +675,12 @@ func (m *ChunkUploadManager) storeAssembledFileStreaming(fs *FileService, fileID
 	// For very large files (>100MB), store directly on disk without compression
 	if fileSize > 100*1024*1024 {
 		// Store large file directly without loading into memory
-		storagePath := filepath.Join(fs.config.TempDir, "files", fileID)
+		filesDir := filepath.Join(fs.config.TempDir, "files")
+		if err := os.MkdirAll(filesDir, 0755); err != nil {
+			return nil, err
+		}
+		
+		storagePath := filepath.Join(filesDir, fileID)
 
 		// Create directory if needed
 		if err := os.MkdirAll(filepath.Dir(storagePath), 0755); err != nil {
@@ -724,6 +729,32 @@ func (m *ChunkUploadManager) storeAssembledFileStreaming(fs *FileService, fileID
 		ctx := context.Background()
 		expiration := 24 * time.Hour
 		
+		// Store file metadata in PostgreSQL
+		fileStorage := &FileStorage{
+			ID:                  fileID,
+			Filename:           filename,
+			OriginalSize:       fileSize,
+			CompressedSize:     nil,
+			MimeType:           detectedMimeType,
+			CompressionType:    "none",
+			StorageType:        "disk",
+			StoragePath:        &storagePath,
+			UploadTime:         now,
+			ExpiresAt:          expiresAt,
+			DeletePassword:     deletePassword,
+			DownloadPassword:   nil,
+			HasDownloadPassword: downloadPassword != "",
+		}
+
+		if downloadPassword != "" {
+			fileStorage.DownloadPassword = &downloadPassword
+		}
+
+		if err := fs.db.SaveFile(fileStorage); err != nil {
+			log.Printf("Failed to save large file metadata to database: %v", err)
+			// Continue with Redis storage for backward compatibility
+		}
+
 		// Store file path reference
 		if err := fs.redis.Set(ctx, "content:"+fileID, "DISK:"+storagePath, expiration).Err(); err != nil {
 			return nil, fmt.Errorf("failed to store file reference: %v", err)

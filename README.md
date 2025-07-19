@@ -23,15 +23,33 @@ ONE is a fast and ultra-lightweight file storage service that enables you to sec
 
 ## Architecture
 
+### Hybrid Storage System
+
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Web Browser   │◄──►│   Go Backend    │◄──►│   Redis Store   │
+│   Web Browser   │◄──►│   Go Backend    │◄──►│   Redis Cache   │
 │                 │    │                 │    │                 │
-│ • Upload UI     │    │ • Compression   │    │ • File Content  │
-│ • Preview       │    │ • ZIP Browsing  │    │ • Metadata      │
-│ • ZIP Preview   │    │ • Password Auth │    │ • File Index    │
+│ • Upload UI     │    │ • Compression   │    │ • Sessions      │
+│ • Preview       │    │ • ZIP Browsing  │    │ • Processing    │
+│ • ZIP Preview   │    │ • Password Auth │    │ • Temp Data     │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
+                                │
+                                ▼
+                       ┌─────────────────┐    ┌─────────────────┐
+                       │   PostgreSQL    │    │   File System   │
+                       │                 │    │                 │
+                       │ • File Metadata │    │ • Large Files   │
+                       │ • Upload History│    │ • Media Content │
+                       │ • Job Tracking  │    │ • ZIP Archives  │
+                       └─────────────────┘    └─────────────────┘
 ```
+
+### Storage Strategy
+
+- **Redis**: High-speed cache for sessions, processing status, and temporary data
+- **PostgreSQL**: Persistent metadata storage and file tracking
+- **File System**: Large files (>100MB) stored directly on disk
+- **Hybrid Mode**: Automatic selection based on file size and type
 
 ## Quick Start
 
@@ -60,8 +78,24 @@ Edit the `compose.yml` file to configure the service:
 
 ```yaml
 environment:
-  - REDIS_ADDR=redis:6379 # Redis connection
+  # Server Configuration
   - PORT=8080 # Service port
+  
+  # Redis Configuration (Cache & Sessions)
+  - REDIS_ADDR=redis:6379 # Redis connection
+  
+  # PostgreSQL Configuration (Metadata & Persistence)
+  - DATABASE_URL=postgres://user:password@postgres:5432/filedb
+  - DB_HOST=postgres
+  - DB_PORT=5432
+  - DB_USER=user
+  - DB_PASSWORD=password
+  - DB_NAME=filedb
+  - DB_SSLMODE=disable
+  - DB_MAX_CONNS=20
+  - DB_MIN_CONNS=5
+  
+  # File Storage Configuration
   - MAX_FILE_SIZE=10737418240 # Maximum file size (10GB)
   - CHUNK_SIZE=104857600 # Chunk size for large files (100MB - optimized for fewer requests)
   - MAX_CHUNKS_PER_FILE=100 # Maximum chunks per file (100 chunks = 10GB)
@@ -297,14 +331,22 @@ curl http://localhost:8080/api/metadata/8e0e8842-2aac-456c-b83a-192321b1e6ae
 
 - **Memory**: < 50MB base usage
 - **CPU**: Minimal, scales with compression workload
-- **Storage**: Redis-based with optional persistence
+- **Storage**: Hybrid Redis + PostgreSQL + File System
 - **Network**: Streaming I/O for efficient transfers
 
 ### Scalability
 
 - **Horizontal**: Deploy multiple instances behind load balancer
-- **Vertical**: Increase Redis memory for more files
-- **Storage**: Redis persistence or external Redis cluster
+- **Vertical**: Scale PostgreSQL and Redis independently
+- **Storage**: PostgreSQL clustering, Redis clustering, distributed file storage
+- **Performance**: Automatic storage tier selection based on file size
+
+### Improved Reliability
+
+- **Persistent Metadata**: PostgreSQL ensures file metadata survives restarts
+- **Large File Support**: Direct disk storage for files > 100MB
+- **Better Error Handling**: Enhanced status tracking and error recovery
+- **Consistent State**: Hybrid storage prevents "File not found" errors
 
 ## Advanced Configuration
 
