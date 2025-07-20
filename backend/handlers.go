@@ -20,7 +20,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
-	"github.com/go-redis/redis/v8"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/klauspost/compress/zstd"
 	"github.com/pierrec/lz4/v4"
@@ -1958,29 +1957,20 @@ func (s *FileService) updateFileExpiration(c *gin.Context) {
 		return
 	}
 
-	metadataJSON, err := s.redis.Get(ctx, "file:"+fileID).Result()
-	if err == redis.Nil {
+	// Get file metadata from PostgreSQL
+	fileStorage, err := s.db.GetFileMetadata(fileID)
+	if err != nil {
+		log.Printf("Failed to get file metadata: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+		return
+	}
+	
+	if fileStorage == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
 		return
-	} else if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get file metadata"})
-		return
 	}
 
-	var metadata FileMetadata
-	if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse file metadata"})
-		return
-	}
-
-	oldExpiresAt := metadata.ExpiresAt
-	metadata.ExpiresAt = expiresAt
-
-	updatedMetadataJSON, err := json.Marshal(metadata)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to serialize updated metadata"})
-		return
-	}
+	oldExpiresAt := fileStorage.ExpiresAt
 
 	newExpiration := time.Until(expiresAt)
 	if newExpiration <= 0 {
@@ -1991,17 +1981,38 @@ func (s *FileService) updateFileExpiration(c *gin.Context) {
 		return
 	}
 
-	pipe := s.redis.Pipeline()
-	pipe.Set(ctx, "file:"+fileID, updatedMetadataJSON, newExpiration)
-	pipe.Expire(ctx, "content:"+fileID, newExpiration)
-	pipe.ZAdd(ctx, "files", &redis.Z{
-		Score:  float64(expiresAt.Unix()),
-		Member: fileID,
-	})
-
-	if _, err := pipe.Exec(ctx); err != nil {
+	// Update expiration in PostgreSQL
+	if err := s.db.UpdateFileExpiration(fileID, expiresAt); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update file expiration"})
 		return
+	}
+
+	// Update Redis cache if it exists (optional)
+	metadata := FileMetadata{
+		ID:                  fileStorage.ID,
+		Filename:           fileStorage.Filename,
+		Size:               fileStorage.OriginalSize,
+		CompressedSize:     0,
+		MimeType:           fileStorage.MimeType,
+		Compression:        CompressionType(fileStorage.CompressionType),
+		UploadTime:         fileStorage.UploadTime,
+		ExpiresAt:          expiresAt,
+		DeletePassword:     fileStorage.DeletePassword,
+		DownloadPassword:   "",
+		HasDownloadPassword: fileStorage.HasDownloadPassword,
+	}
+	
+	if fileStorage.CompressedSize != nil {
+		metadata.CompressedSize = *fileStorage.CompressedSize
+	}
+	
+	if fileStorage.DownloadPassword != nil {
+		metadata.DownloadPassword = *fileStorage.DownloadPassword
+	}
+
+	// Update Redis cache (best effort)
+	if updatedMetadataJSON, err := json.Marshal(metadata); err == nil {
+		s.redis.Set(ctx, "file:"+fileID, updatedMetadataJSON, newExpiration)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -2015,7 +2026,6 @@ func (s *FileService) updateFileExpiration(c *gin.Context) {
 
 func (s *FileService) adminDeleteFile(c *gin.Context) {
 	fileID := c.Param("id")
-	ctx := context.Background()
 
 	var req AdminRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -2039,47 +2049,39 @@ func (s *FileService) adminDeleteFile(c *gin.Context) {
 		return
 	}
 
-	// Check if file exists
-	metadataJSON, err := s.redis.Get(ctx, "file:"+fileID).Result()
-	if err == redis.Nil {
+	// Get file metadata from PostgreSQL
+	fileStorage, err := s.db.GetFileMetadata(fileID)
+	if err != nil {
+		log.Printf("Failed to get file metadata: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+		return
+	}
+	
+	if fileStorage == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
 		return
-	} else if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve file metadata"})
+	}
+
+	// Delete from PostgreSQL
+	if err := s.db.DeleteFile(fileID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete file from database"})
 		return
 	}
 
-	var metadata FileMetadata
-	if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse file metadata"})
-		return
-	}
-
-	// Delete from Redis
-	pipe := s.redis.Pipeline()
-	pipe.Del(ctx, "file:"+fileID)
-	pipe.Del(ctx, "content:"+fileID)
-	pipe.ZRem(ctx, "files", fileID)
-
-	// Delete from disk if stored there (large files > 100MB)
-	// Check if file size indicates disk storage
-	if metadata.Size > 100*1024*1024 {
-		filesDir := filepath.Join(s.config.TempDir, "files")
-		storagePath := filepath.Join(filesDir, fileID)
-		if err := os.Remove(storagePath); err != nil && !os.IsNotExist(err) {
+	// Delete disk file if it exists
+	if fileStorage.StorageType == "disk" && fileStorage.StoragePath != nil {
+		if err := os.Remove(*fileStorage.StoragePath); err != nil && !os.IsNotExist(err) {
 			log.Printf("Failed to delete file from disk: %v", err)
 		}
 	}
 
-	if _, err := pipe.Exec(ctx); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete file"})
-		return
-	}
+	// Remove from Redis cache (optional cleanup)
+	s.redis.Del(context.Background(), "file:"+fileID)
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "File deleted successfully",
 		"file_id": fileID,
-		"filename": metadata.Filename,
+		"filename": fileStorage.Filename,
 	})
 }
 

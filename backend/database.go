@@ -166,6 +166,29 @@ func (db *Database) CleanupExpiredData() error {
 	return nil
 }
 
+// UpdateFileExpiration updates the expiration time for a file
+func (db *Database) UpdateFileExpiration(fileID string, expiresAt time.Time) error {
+	ctx := context.Background()
+	
+	query := `
+		UPDATE files 
+		SET expires_at = $2, updated_at = NOW()
+		WHERE id = $1
+	`
+	
+	result, err := db.Pool.Exec(ctx, query, fileID, expiresAt)
+	if err != nil {
+		return fmt.Errorf("failed to update file expiration: %v", err)
+	}
+	
+	rowsAffected := result.RowsAffected()
+	if rowsAffected == 0 {
+		return fmt.Errorf("file not found")
+	}
+	
+	return nil
+}
+
 // FileStorage represents file metadata and content in the database
 type FileStorage struct {
 	ID              string    `db:"id"`
