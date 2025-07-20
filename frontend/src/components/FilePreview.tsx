@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { AlertTriangle, File, Folder, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import AudioPlayer from './AudioPlayer';
 import { FileMetadata, ZipContents, ZipFile } from '../types';
 import {
 	getFilePreview,
@@ -351,16 +352,8 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata, password, a
 			}
 
 			return (
-				<div className='flex justify-center'>
-					<audio
-						controls
-						className='w-full max-w-lg'
-						preload={isLargeAudio ? 'metadata' : 'auto'}
-						crossOrigin='anonymous'
-					>
-						<source src={streamUrl} type={mime_type} />
-						Your browser does not support the audio tag.
-					</audio>
+				<div className='flex justify-center w-full'>
+					<AudioPlayer src={streamUrl} mimeType={mime_type} className='w-full max-w-lg' />
 				</div>
 			);
 		}
@@ -596,15 +589,9 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata, password, a
 		}
 
 		if (contentType.startsWith('audio/')) {
-			// For large audio files, show loading optimization
-			const isLargeAudio = zipFilePreview.file.size > 5 * 1024 * 1024;
-
 			return (
 				<div className='flex justify-center'>
-					<audio controls className='w-full max-w-lg' preload={isLargeAudio ? 'metadata' : 'auto'}>
-						<source src={previewUrl} type={contentType} />
-						Your browser does not support the audio tag.
-					</audio>
+					<AudioPlayer src={previewUrl} mimeType={contentType} className='w-full max-w-lg' />
 				</div>
 			);
 		}
