@@ -134,6 +134,7 @@ func main() {
 		// Admin endpoints
 		api.POST("/admin/auth", service.adminAuth)
 		api.PUT("/admin/file/:id/expires", service.updateFileExpiration)
+		api.PUT("/admin/file/password", service.updateFilePassword)
 		api.DELETE("/admin/file/:id", service.adminDeleteFile)
 		api.POST("/admin/files", service.getAdminFileList)
 	}

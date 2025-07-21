@@ -537,3 +537,64 @@ func (db *Database) LogFileAccess(fileID, accessType, ipAddress, userAgent strin
 	
 	return nil
 }
+
+// UpdateFileDownloadPassword updates the download password for a file
+func (db *Database) UpdateFileDownloadPassword(fileID string, newPassword string) error {
+	ctx := context.Background()
+	
+	var query string
+	var args []interface{}
+	
+	if newPassword == "" {
+		// Remove download password
+		query = `
+			UPDATE files 
+			SET download_password = NULL, has_download_password = false, updated_at = NOW()
+			WHERE id = $1
+		`
+		args = []interface{}{fileID}
+	} else {
+		// Set new download password
+		query = `
+			UPDATE files 
+			SET download_password = $2, has_download_password = true, updated_at = NOW()
+			WHERE id = $1
+		`
+		args = []interface{}{fileID, newPassword}
+	}
+	
+	result, err := db.Pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("failed to update download password: %v", err)
+	}
+	
+	rowsAffected := result.RowsAffected()
+	if rowsAffected == 0 {
+		return fmt.Errorf("file not found")
+	}
+	
+	return nil
+}
+
+// UpdateFileDeletePassword updates the delete password for a file
+func (db *Database) UpdateFileDeletePassword(fileID string, newPassword string) error {
+	ctx := context.Background()
+	
+	query := `
+		UPDATE files 
+		SET delete_password = $2, updated_at = NOW()
+		WHERE id = $1
+	`
+	
+	result, err := db.Pool.Exec(ctx, query, fileID, newPassword)
+	if err != nil {
+		return fmt.Errorf("failed to update delete password: %v", err)
+	}
+	
+	rowsAffected := result.RowsAffected()
+	if rowsAffected == 0 {
+		return fmt.Errorf("file not found")
+	}
+	
+	return nil
+}

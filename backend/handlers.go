@@ -2085,6 +2085,82 @@ func (s *FileService) adminDeleteFile(c *gin.Context) {
 	})
 }
 
+type UpdatePasswordRequest struct {
+	AdminPassword string `json:"admin_password"`
+	FileID        string `json:"file_id"`
+	NewPassword   string `json:"new_password"`
+	PasswordType  string `json:"password_type"` // "download" or "delete"
+}
+
+func (s *FileService) updateFilePassword(c *gin.Context) {
+	var req UpdatePasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
+		return
+	}
+
+	if s.config.AdminPassword == "" {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "Admin functionality not configured",
+			"message": "ADMIN_PASSWORD environment variable not set",
+		})
+		return
+	}
+
+	if req.AdminPassword != s.config.AdminPassword {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error": "Invalid admin password",
+			"message": "The provided admin password is incorrect",
+		})
+		return
+	}
+
+	if req.PasswordType != "download" && req.PasswordType != "delete" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid password type",
+			"message": "Password type must be 'download' or 'delete'",
+		})
+		return
+	}
+
+	// Get file metadata from PostgreSQL
+	fileStorage, err := s.db.GetFileMetadata(req.FileID)
+	if err != nil {
+		log.Printf("Failed to get file metadata: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+		return
+	}
+	
+	if fileStorage == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
+		return
+	}
+
+	// Update password in database
+	if req.PasswordType == "download" {
+		err = s.db.UpdateFileDownloadPassword(req.FileID, req.NewPassword)
+	} else {
+		err = s.db.UpdateFileDeletePassword(req.FileID, req.NewPassword)
+	}
+
+	if err != nil {
+		log.Printf("Failed to update %s password: %v", req.PasswordType, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update password"})
+		return
+	}
+
+	// Update Redis cache if it exists (optional)
+	ctx := context.Background()
+	s.redis.Del(ctx, "file:"+req.FileID)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": fmt.Sprintf("%s password updated successfully", req.PasswordType),
+		"file_id": req.FileID,
+		"filename": fileStorage.Filename,
+		"password_type": req.PasswordType,
+	})
+}
+
 func (s *FileService) getAdminFileList(c *gin.Context) {
 	ctx := context.Background()
 

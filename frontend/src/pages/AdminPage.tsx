@@ -11,6 +11,7 @@ import {
 	Copy,
 	Eye,
 	Lock,
+	Key,
 } from 'lucide-react';
 import Footer from '../components/Footer';
 import Button from '../components/Button';
@@ -220,6 +221,61 @@ const AdminPage: React.FC = () => {
 	const viewFile = (fileId: string) => {
 		const url = `/f/${fileId}?admin_token=${encodeURIComponent(adminToken)}`;
 		window.open(url, '_blank');
+	};
+
+	const updatePassword = async (
+		fileId: string,
+		filename: string,
+		passwordType: 'download' | 'delete'
+	) => {
+		const passwordTypeLabel = passwordType === 'download' ? 'Download' : 'Delete';
+		const currentPassword =
+			files.find((f) => f.file_id === fileId)?.has_password && passwordType === 'download'
+				? 'Current password exists'
+				: '';
+
+		const newPassword = prompt(
+			`Enter new ${passwordTypeLabel.toLowerCase()} password for "${filename}":\n${
+				currentPassword ? '(Leave empty to remove password)' : ''
+			}`,
+			''
+		);
+
+		if (newPassword === null) return; // User cancelled
+
+		setLoading(true);
+		setError('');
+
+		try {
+			const response = await fetch('/api/admin/file/password', {
+				method: 'PUT',
+				headers: {
+					'Content-Type': 'application/json',
+				},
+				body: JSON.stringify({
+					admin_password: adminPassword,
+					file_id: fileId,
+					new_password: newPassword,
+					password_type: passwordType,
+				}),
+			});
+
+			if (response.ok) {
+				if (newPassword === '') {
+					setMessage(`${passwordTypeLabel} password removed for "${filename}"`);
+				} else {
+					setMessage(`${passwordTypeLabel} password updated for "${filename}"`);
+				}
+				await refreshFileList();
+			} else {
+				const errorData = await response.json();
+				setError(errorData.error || 'Failed to update password');
+			}
+		} catch {
+			setError('Network error occurred');
+		} finally {
+			setLoading(false);
+		}
 	};
 
 	const logout = () => {
@@ -456,7 +512,7 @@ const AdminPage: React.FC = () => {
 												</div>
 											</td>
 											<td className='px-6 py-4'>
-												<div className='flex items-center gap-2'>
+												<div className='flex items-center gap-1'>
 													<Button
 														onClick={() => viewFile(file.file_id)}
 														variant='secondary'
@@ -474,6 +530,17 @@ const AdminPage: React.FC = () => {
 														icon={Copy}
 														className='p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 border-none bg-transparent'
 														title='Copy URL'
+													>
+														{''}
+													</Button>
+													<Button
+														onClick={() => updatePassword(file.file_id, file.filename, 'download')}
+														disabled={loading}
+														variant='secondary'
+														size='sm'
+														icon={Key}
+														className='p-2 text-purple-600 hover:text-purple-800 hover:bg-purple-50 border-none bg-transparent'
+														title='Set download password'
 													>
 														{''}
 													</Button>
