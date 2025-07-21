@@ -1,5 +1,15 @@
 import React, { useState, useCallback } from 'react';
-import { Lock, Upload, Check, AlertTriangle, FileText, RefreshCw, Archive } from 'lucide-react';
+import {
+	Lock,
+	Upload,
+	Check,
+	AlertTriangle,
+	FileText,
+	RefreshCw,
+	Archive,
+	QrCode,
+	X,
+} from 'lucide-react';
 import { uploadFile } from '../utils/api';
 import { ChunkUploader, shouldUseChunkUpload, formatUploadProgress } from '../utils/chunkUpload';
 import { formatSize } from '../utils/format';
@@ -26,6 +36,9 @@ const UploadArea: React.FC<UploadAreaProps> = ({ onUploadComplete }) => {
 	const [enablePasswordProtection, setEnablePasswordProtection] = useState(false);
 	const [uploadProgress, setUploadProgress] = useState<UploadProgress[]>([]);
 	const [enableBatchUpload, setEnableBatchUpload] = useState(false);
+	const [showQrModal, setShowQrModal] = useState(false);
+	const [selectedFileForQr, setSelectedFileForQr] = useState<UploadResult | null>(null);
+	const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
 
 	const createZipFile = async (files: File[]): Promise<File> => {
 		const JSZip = (await import('jszip')).default;
@@ -40,6 +53,30 @@ const UploadArea: React.FC<UploadAreaProps> = ({ onUploadComplete }) => {
 		const zipFileName = `files-${timestamp}.zip`;
 
 		return new File([zipBlob], zipFileName, { type: 'application/zip' });
+	};
+
+	const generateQrCode = async (uploadResult: UploadResult) => {
+		if (!uploadResult.fileId) return;
+
+		try {
+			const QRCode = (await import('qrcode')).default;
+			const fileUrl = `${window.location.origin}/f/${uploadResult.fileId}`;
+			const qrDataURL = await QRCode.toDataURL(fileUrl, {
+				width: 256,
+				margin: 2,
+				color: {
+					dark: '#000000',
+					light: '#FFFFFF',
+				},
+			});
+			setQrCodeUrl(qrDataURL);
+			setSelectedFileForQr(uploadResult);
+			setShowQrModal(true);
+		} catch (error) {
+			alert(
+				'Failed to generate QR code: ' + (error instanceof Error ? error.message : 'Unknown error')
+			);
+		}
 	};
 
 	const handleFiles = useCallback(
@@ -523,14 +560,24 @@ const UploadArea: React.FC<UploadAreaProps> = ({ onUploadComplete }) => {
 													<div className='font-mono text-sm text-gray-700 break-all flex-1 mr-4'>
 														{window.location.origin}/f/{result.fileId}
 													</div>
-													<button
-														onClick={() =>
-															copyToClipboard(`${window.location.origin}/f/${result.fileId}`)
-														}
-														className='btn-secondary flex items-center gap-2 shrink-0'
-													>
-														COPY
-													</button>
+													<div className='flex gap-2'>
+														<button
+															onClick={() => generateQrCode(result)}
+															className='btn-secondary flex items-center gap-2 shrink-0'
+															title='Generate QR Code'
+														>
+															<QrCode className='w-4 h-4' />
+															QR
+														</button>
+														<button
+															onClick={() =>
+																copyToClipboard(`${window.location.origin}/f/${result.fileId}`)
+															}
+															className='btn-secondary flex items-center gap-2 shrink-0'
+														>
+															COPY
+														</button>
+													</div>
 												</div>
 											</div>
 
@@ -578,6 +625,51 @@ const UploadArea: React.FC<UploadAreaProps> = ({ onUploadComplete }) => {
 						<p className='text-primary-700 font-medium'>
 							Share these URLs with anyone. Files will expire in 24 hours.
 						</p>
+					</div>
+				</div>
+			)}
+
+			{/* QR Code Modal */}
+			{showQrModal && selectedFileForQr && (
+				<div className='fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4'>
+					<div className='bg-white shadow-angular-xl w-full max-w-md'>
+						<div className='p-6'>
+							<div className='flex items-center justify-between mb-4'>
+								<h3 className='text-xl font-medium text-gray-900'>QR Code</h3>
+								<button
+									onClick={() => setShowQrModal(false)}
+									className='text-gray-400 hover:text-gray-600'
+								>
+									<X className='w-6 h-6' />
+								</button>
+							</div>
+							<p className='text-gray-600 mb-4'>
+								Scan this QR code to access "{selectedFileForQr.filename}"
+							</p>
+							<div className='flex justify-center mb-6'>
+								{qrCodeUrl && (
+									<img src={qrCodeUrl} alt='QR Code' className='w-64 h-64 border border-gray-200' />
+								)}
+							</div>
+							<div className='flex gap-3'>
+								<button onClick={() => setShowQrModal(false)} className='btn-secondary flex-1'>
+									Close
+								</button>
+								<button
+									onClick={() => {
+										if (qrCodeUrl) {
+											const link = document.createElement('a');
+											link.download = `${selectedFileForQr.filename}_qr.png`;
+											link.href = qrCodeUrl;
+											link.click();
+										}
+									}}
+									className='btn-primary flex-1'
+								>
+									Download QR
+								</button>
+							</div>
+						</div>
 					</div>
 				</div>
 			)}
