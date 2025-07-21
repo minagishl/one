@@ -31,6 +31,8 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata, password, a
 	const [isZipFilePreviewOpen, setIsZipFilePreviewOpen] = useState(false);
 	const [isLoading, setIsLoading] = useState(false);
 	const [loadingProgress, setLoadingProgress] = useState(0);
+	const videoRef = React.useRef<HTMLVideoElement>(null);
+	const zipVideoRef = React.useRef<HTMLVideoElement>(null);
 
 	useEffect(() => {
 		loadPreview();
@@ -50,32 +52,98 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata, password, a
 
 	useEffect(() => {
 		const handleKeyDown = (event: KeyboardEvent) => {
-			if (!isZipFilePreviewOpen || !zipFilePreview) return;
+			// Handle ZIP file preview navigation and video controls
+			if (isZipFilePreviewOpen && zipFilePreview) {
+				// Check if it's a video in ZIP preview
+				const zipVideo = zipVideoRef.current;
+				if (zipVideo && zipFilePreview.contentType.startsWith('video/')) {
+					switch (event.key) {
+						case 'ArrowLeft':
+							event.preventDefault();
+							zipVideo.currentTime = Math.max(0, zipVideo.currentTime - 10);
+							break;
+						case 'ArrowRight':
+							event.preventDefault();
+							zipVideo.currentTime = Math.min(zipVideo.duration || 0, zipVideo.currentTime + 10);
+							break;
+						case ' ':
+							event.preventDefault();
+							if (zipVideo.paused) {
+								zipVideo.play();
+							} else {
+								zipVideo.pause();
+							}
+							break;
+						case 'Escape':
+							event.preventDefault();
+							closeZipFilePreview();
+							break;
+						default:
+							// For other keys, allow ZIP navigation
+							switch (event.key) {
+								case 'n':
+								case 'N':
+									event.preventDefault();
+									navigateToFile('next');
+									break;
+								case 'p':
+								case 'P':
+									event.preventDefault();
+									navigateToFile('prev');
+									break;
+							}
+							break;
+					}
+				} else {
+					// Non-video ZIP file preview navigation
+					switch (event.key) {
+						case 'ArrowLeft':
+							event.preventDefault();
+							navigateToFile('prev');
+							break;
+						case 'ArrowRight':
+							event.preventDefault();
+							navigateToFile('next');
+							break;
+						case 'Escape':
+							event.preventDefault();
+							closeZipFilePreview();
+							break;
+					}
+				}
+				return;
+			}
 
-			switch (event.key) {
-				case 'ArrowLeft':
-					event.preventDefault();
-					navigateToFile('prev');
-					break;
-				case 'ArrowRight':
-					event.preventDefault();
-					navigateToFile('next');
-					break;
-				case 'Escape':
-					event.preventDefault();
-					closeZipFilePreview();
-					break;
+			// Handle main video playback controls
+			const video = videoRef.current;
+			if (video && metadata.mime_type.startsWith('video/')) {
+				switch (event.key) {
+					case 'ArrowLeft':
+						event.preventDefault();
+						video.currentTime = Math.max(0, video.currentTime - 10);
+						break;
+					case 'ArrowRight':
+						event.preventDefault();
+						video.currentTime = Math.min(video.duration || 0, video.currentTime + 10);
+						break;
+					case ' ':
+						event.preventDefault();
+						if (video.paused) {
+							video.play();
+						} else {
+							video.pause();
+						}
+						break;
+				}
 			}
 		};
 
-		if (isZipFilePreviewOpen) {
-			document.addEventListener('keydown', handleKeyDown);
-		}
+		document.addEventListener('keydown', handleKeyDown);
 
 		return () => {
 			document.removeEventListener('keydown', handleKeyDown);
 		};
-	}, [isZipFilePreviewOpen, zipFilePreview]);
+	}, [isZipFilePreviewOpen, zipFilePreview, metadata.mime_type]);
 
 	const loadPreview = async () => {
 		try {
@@ -324,15 +392,22 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata, password, a
 			}
 
 			return (
-				<video
-					controls
-					className='max-w-full max-h-[80vh] mx-auto'
-					src={streamUrl}
-					preload={isLargeVideo ? 'metadata' : 'auto'}
-					crossOrigin='anonymous'
-				>
-					Your browser does not support the video tag.
-				</video>
+				<div className='relative'>
+					<video
+						ref={videoRef}
+						controls
+						className='max-w-full max-h-[80vh] mx-auto'
+						src={streamUrl}
+						preload={isLargeVideo ? 'metadata' : 'auto'}
+						crossOrigin='anonymous'
+						tabIndex={0}
+					>
+						Your browser does not support the video tag.
+					</video>
+					<div className='text-center text-sm text-gray-500 mt-2'>
+						Press ← → to skip 10s, Space to play/pause
+					</div>
+				</div>
 			);
 		}
 
@@ -577,14 +652,21 @@ const FilePreview: React.FC<FilePreviewProps> = ({ fileId, metadata, password, a
 			const isLargeVideo = zipFilePreview.file.size > 5 * 1024 * 1024;
 
 			return (
-				<video
-					controls
-					className='max-w-full max-h-[60vh] mx-auto'
-					src={previewUrl}
-					preload={isLargeVideo ? 'metadata' : 'auto'}
-				>
-					Your browser does not support the video tag.
-				</video>
+				<div className='relative'>
+					<video
+						ref={zipVideoRef}
+						controls
+						className='max-w-full max-h-[60vh] mx-auto'
+						src={previewUrl}
+						preload={isLargeVideo ? 'metadata' : 'auto'}
+						tabIndex={0}
+					>
+						Your browser does not support the video tag.
+					</video>
+					<div className='text-center text-sm text-gray-500 mt-2'>
+						Press ← → to skip 10s, Space to play/pause, N/P to navigate files, Esc to close
+					</div>
+				</div>
 			);
 		}
 
