@@ -556,14 +556,14 @@ const UploadArea: React.FC<UploadAreaProps> = ({ onUploadComplete }) => {
 										<div className='space-y-4'>
 											{/* Share URL */}
 											<div className='bg-gray-50 p-4 border border-gray-200'>
-												<div className='flex items-center justify-between'>
-													<div className='font-mono text-sm text-gray-700 break-all flex-1 mr-4'>
+												<div className='flex flex-col sm:flex-row items-center justify-between'>
+													<div className='font-mono text-sm text-gray-700 break-all flex-1 sm:mr-4'>
 														{window.location.origin}/f/{result.fileId}
 													</div>
-													<div className='flex gap-2'>
+													<div className='flex w-full sm:w-auto gap-4 mt-4 sm:mt-0'>
 														<button
 															onClick={() => generateQrCode(result)}
-															className='btn-secondary flex items-center gap-2 shrink-0'
+															className='btn-secondary flex items-center gap-2 shrink-0 w-[calc(50%-0.5rem)] justify-center'
 															title='Generate QR Code'
 														>
 															<QrCode className='w-4 h-4' />
@@ -573,7 +573,7 @@ const UploadArea: React.FC<UploadAreaProps> = ({ onUploadComplete }) => {
 															onClick={() =>
 																copyToClipboard(`${window.location.origin}/f/${result.fileId}`)
 															}
-															className='btn-secondary flex items-center gap-2 shrink-0'
+															className='btn-secondary flex items-center gap-2 shrink-0 w-[calc(50%-0.5rem)] justify-center'
 														>
 															COPY
 														</button>
